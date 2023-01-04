@@ -535,11 +535,11 @@ class calibrate_uvh5:
             ant2_str = 'ea' + str(ant2[bl]).zfill(2)
             #bls_str = 'ea'+ ant1_str +'-ea'+ ant2_str
             ant_base = [ant1_str, ant2_str]
-            print(ant_base)
+            #print(ant_base)
             if ref_ant in ant_base:
                 ant_base.remove(ref_ant)
                 ant_new = ant_base[0]
-                print(ant_new)
+                #print(ant_new)
                 if ant1_str == ref_ant and ant2_str == ref_ant:
                    #if both antennas are the ref antenna case
                     dh.write(f"{ant_new}, {np.mean(delay_vals[bl,:,0])}, {np.mean(delay_vals[bl,:,1])} \n")
