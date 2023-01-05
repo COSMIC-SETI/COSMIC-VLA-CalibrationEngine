@@ -726,7 +726,7 @@ def main(args):
         out = {
             'freqs_hz': metadata['freq_array'].tolist(),
             'phases_pol0': np.angle(gain_av[:,:,0]).tolist(),
-            'phases_pol1': np.angle(gain_av[:,:,1]).tolist(),
+            'phases_pol1': np.angle(gain_av[:,:,3]).tolist(),
         }
         outname = os.path.join(args.out_dir, args.dat_file + '_phasecal.json')
         with open(outname, 'w') as fh:
