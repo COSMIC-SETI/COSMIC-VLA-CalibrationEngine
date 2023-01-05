@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 import time
+import json
 import numpy as np
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
@@ -151,6 +152,7 @@ class calibrate_uvh5:
         """
         outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0] +'.ms')
         return self.uvd.write_ms(outfile)
+
 
     def derive_phase(self):
         """
@@ -691,6 +693,7 @@ def main(args):
     
     #Print the metdata of the input file
     cal_ob.print_metadata()
+    metadata = cal_ob.get_metadata()
 
     #Uncomment the following lines depending on the tasks to be completed
 
@@ -712,11 +715,22 @@ def main(args):
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
-    cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+    #cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
-    #gain = cal_ob.derive_phase()
+    if args.genphase:
+        gain = cal_ob.derive_phase() # An antenna x time x channel x ?cross-pol?
+        # Assume we have legit phase tracking and little transient RFI
+        gain_av = gain.mean(axis=1) # average_over_time
+        out = {
+            'freqs_hz': metadata['freq_array'].tolist(),
+            'phases_pol0': np.angle(gain_av[:,:,0]).tolist(),
+            'phases_pol1': np.angle(gain_av[:,:,1]).tolist(),
+        }
+        outname = os.path.join(args.out_dir, args.dat_file + '_phasecal.json')
+        with open(outname, 'w') as fh:
+            json.dump(out, fh)
 
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
@@ -743,6 +757,8 @@ if __name__ == '__main__':
     parser.add_argument('-d','--dat_file', type = str, required = True, help = 'UVH5 file to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
+    parser.add_argument('--genphase', action='store_true',
+            help = 'If set, generate a file of output phases per antpol')
     args = parser.parse_args()
     main(args)
 
