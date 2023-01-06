@@ -18,8 +18,8 @@ def main(args):
     with open(args.infile, 'r') as fh:
         indat = json.load(fh)
     freqs_hz += indat['freqs_hz'] 
-    print(len(indat['phases_pol0']))
-    print(len(phases_pol0))
+    #print(len(indat['phases_pol0']))
+    #print(len(phases_pol0))
     ant_names = indat['ant_names']
     for ant in range(NANTS):
         ant_name = ant_names[ant]
