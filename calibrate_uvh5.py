@@ -779,7 +779,7 @@ def main(args):
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outname = os.path.join(args.out_dir, args.dat_file + '_phasecal.json')
+        outname = os.path.join(args.out_dir, os.path.basename(args.dat_file) + '_phasecal.json')
         with open(outname, 'w') as fh:
             json.dump(out, fh)
 
