@@ -36,7 +36,6 @@ def main(args):
     #phases_pol1 = np.array(phases_pol1)
 
     for ant_name in phases_pol0.keys():
-        print('Antenna %s' % ant_name)
         #unwrap_phases
         phases0 = np.array(np.unwrap(phases_pol0[ant_name]))
         phases1 = np.array(np.unwrap(phases_pol1[ant_name]))
