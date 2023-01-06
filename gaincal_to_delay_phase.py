@@ -47,12 +47,14 @@ def main(args):
         residual1 = phases1 - (pol1_phase_slope*freqs_hz)
         residual0 = residual0 % (2*np.pi)
         residual1 = residual1 % (2*np.pi)
-        print('Pol 0 delay ns: %.2f' % (pol0_phase_slope/(2*np.pi) * 1e9))
-        #print('Pol 0 phase:')
-        #print(residual0)
-        print('Pol 1 delay ns: %.2f' % (pol1_phase_slope/(2*np.pi) * 1e9))
-        #print('Pol 1 phase:')
-        #print(residual1)
+        print('%s pol 0 delay ns: %.2f' % (ant_name, pol0_phase_slope/(2*np.pi) * 1e9))
+        if args.print_phases:
+            print('%s pol 0 residual phase:' % (ant_name))
+            print(residual0)
+        print('%s 1 delay ns: %.2f' % (ant_name, pol1_phase_slope/(2*np.pi) * 1e9))
+        if args.print_phases:
+            print('%s pol 1 residual phase:' % (ant_name))
+            print(residual1)
 
 
 if __name__ == '__main__':
@@ -61,6 +63,8 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-i','--infile', type = str, required = True, help = 'input gaincal JSON file')
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory for calibration JSON')
+    parser.add_argument('--print_phases', action='store_true',
+            help='If True, print phases to screen')
     args = parser.parse_args()
     main(args)
 
