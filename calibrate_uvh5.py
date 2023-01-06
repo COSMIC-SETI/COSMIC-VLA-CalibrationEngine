@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 import time
+import json
 import numpy as np
 import pandas as pd
 import json
@@ -155,6 +156,7 @@ class calibrate_uvh5:
         """
         outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0] +'.ms')
         return self.uvd.write_ms(outfile)
+
 
     def derive_phase(self):
         """
@@ -495,13 +497,18 @@ class calibrate_uvh5:
 
         # Writing the delay values to a csv file
         #Opening a file to save the delays for each baselines
-        tun_mnt = self.datafile.split('/')[2]
-        if tun_mnt == 'buf0':
-            tun = 'AC'
-        else:
-            tun = 'BD'
-        self.outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
-        dh = open(self.outfile_res, "w")
+
+        try:
+            tun_mnt = self.datafile.split('/')[2]
+            if tun_mnt == 'buf0':
+                tun = 'AC'
+            else:
+                tun = 'BD'
+        except:
+            tun = 'Unknown'
+        outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
+        dh = open(outfile_res, "w")
+
         dh.write(",".join(
                 [
                 "Baseline",
@@ -556,6 +563,45 @@ class calibrate_uvh5:
             
 
         dh.close()
+
+    def get_phases(self, ref_ant = 'ea10'):
+
+        nbl, ntime, nchan, npol = self.vis_data.shape
+        nant = self.metadata['nant_data']
+
+        #Antenna corresponding to each baselines
+        ant1, ant2 = self.uvd.baseline_to_antnums(self.uvd.baseline_array[:])
+        
+        ##Array to store the accumulated spectra for each antenna vs reference
+        #spectra = {}
+        #for ant in self.metadata['ant_names']:
+        #    spectra[ant] = np.zeros([nchan, npol], dtype=complex)
+        phase_vals = np.zeros([nant, 2, nchan], dtype=float)
+        ant_names = ['' for _ in range(nant)]
+        n = 0
+
+        for bl in range(nbl):
+            # only use baselines with a refant
+            antname1 = 'ea%.2d' % ant1[bl]
+            antname2 = 'ea%.2d' % ant2[bl]
+            if (antname1 == ref_ant):
+                calant = antname2
+                flip = 1
+            elif (antname2 == ref_ant):
+                calant = antname1
+                flip = -1
+            else:
+                # Skip baselines which don't include ref
+                continue
+
+            # average over time (assume tracking is working)
+            data = self.vis_data[bl].mean(axis=0)
+
+            phase_vals[n,0] = flip*np.angle(data[:,0])
+            phase_vals[n,1] = flip*np.angle(data[:,3])
+            ant_names[n] = calant
+            n += 1
+        return ant_names, phase_vals
 
 
     def plot_delays_waterflall(self, data, outdir, track_delay = True):
@@ -703,6 +749,7 @@ def main(args):
     
     #Print the metdata of the input file
     cal_ob.print_metadata()
+    metadata = cal_ob.get_metadata()
 
     #Uncomment the following lines depending on the tasks to be completed
 
@@ -724,14 +771,35 @@ def main(args):
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
-    cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+
+    if args.gendelay:
+        cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
 
     if args.pub_to_redis:
         cal_ob.pub_to_redis()
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
-    #gain = cal_ob.derive_phase()
+    if args.genphase:
+        #gain = cal_ob.derive_phase() # An antenna x time x channel x ?cross-pol?
+        ## Assume we have legit phase tracking and little transient RFI
+        #gain_av = gain.mean(axis=1) # average_over_time
+        #out = {
+        #    'ant_names': metadata['ant_names'],
+        #    'freqs_hz': metadata['freq_array'].tolist(),
+        #    'phases_pol0': np.angle(gain_av[:,:,0]).tolist(),
+        #    'phases_pol1': np.angle(gain_av[:,:,3]).tolist(),
+        #}
+        antnames, phases = cal_ob.get_phases() # An antenna x time x channel x ?cross-pol?
+        out = {
+            'ant_names': antnames,
+            'freqs_hz': metadata['freq_array'].tolist(),
+            'phases_pol0': phases[:,0].tolist(),
+            'phases_pol1': phases[:,1].tolist(),
+        }
+        outname = os.path.join(args.out_dir, os.path.basename(args.dat_file) + '_phasecal.json')
+        with open(outname, 'w') as fh:
+            json.dump(out, fh)
 
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
@@ -758,7 +826,12 @@ if __name__ == '__main__':
     parser.add_argument('-d','--dat_file', type = str, required = True, help = 'UVH5 file to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
+    parser.add_argument('--genphase', action='store_true',
+            help = 'If set, generate a file of output phases per antpol')
+    parser.add_argument('--gendelay', action='store_true',
+            help = 'If set, generate a file of output delays per antpol')
     parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
+
     args = parser.parse_args()
     main(args)
 
