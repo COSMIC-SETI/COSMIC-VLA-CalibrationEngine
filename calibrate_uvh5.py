@@ -493,11 +493,14 @@ class calibrate_uvh5:
 
         # Writing the delay values to a csv file
         #Opening a file to save the delays for each baselines
-        tun_mnt = self.datafile.split('/')[2]
-        if tun_mnt == 'buf0':
-            tun = 'AC'
-        else:
-            tun = 'BD'
+        try:
+            tun_mnt = self.datafile.split('/')[2]
+            if tun_mnt == 'buf0':
+                tun = 'AC'
+            else:
+                tun = 'BD'
+        except:
+            tun = 'Unknown'
         outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
         dh = open(outfile_res, "w")
         dh.write(",".join(
@@ -715,7 +718,8 @@ def main(args):
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
-    #cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+    if args.gendelay:
+        cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
@@ -760,6 +764,8 @@ if __name__ == '__main__':
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
     parser.add_argument('--genphase', action='store_true',
             help = 'If set, generate a file of output phases per antpol')
+    parser.add_argument('--gendelay', action='store_true',
+            help = 'If set, generate a file of output delays per antpol')
     args = parser.parse_args()
     main(args)
 
