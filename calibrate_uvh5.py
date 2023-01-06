@@ -724,6 +724,7 @@ def main(args):
         # Assume we have legit phase tracking and little transient RFI
         gain_av = gain.mean(axis=1) # average_over_time
         out = {
+            'ant_names': metadata['ant_names'],
             'freqs_hz': metadata['freq_array'].tolist(),
             'phases_pol0': np.angle(gain_av[:,:,0]).tolist(),
             'phases_pol1': np.angle(gain_av[:,:,3]).tolist(),
