@@ -9,6 +9,9 @@ import argparse
 import time
 import json
 import numpy as np
+import pandas as pd
+import json
+import redis
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
@@ -47,6 +50,7 @@ class calibrate_uvh5:
         self.metadata = self.get_metadata()
         self.vis_data = self.get_vis_data_new()
         self.ant_indices = self.get_ant_array_indices()
+        self.redis_obj = redis.Redis(host="redishost", decode_responses=True)
 
     def get_metadata(self):
         """
@@ -493,6 +497,7 @@ class calibrate_uvh5:
 
         # Writing the delay values to a csv file
         #Opening a file to save the delays for each baselines
+
         try:
             tun_mnt = self.datafile.split('/')[2]
             if tun_mnt == 'buf0':
@@ -503,6 +508,7 @@ class calibrate_uvh5:
             tun = 'Unknown'
         outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
         dh = open(outfile_res, "w")
+
         dh.write(",".join(
                 [
                 "Baseline",
@@ -723,10 +729,18 @@ class calibrate_uvh5:
                 plt.savefig(outfile_peak, dpi = 150)
                 plt.close()    
             
-          
-        
-                 
-        
+
+    def pub_to_redis(self):
+        residual_delays = pd.read_csv(self.outfile_res).to_dict('records')
+        dict_to_pub = {}
+        for i in range(len(residual_delays)):
+            dict_to_pub[residual_delays[i]['Baseline']] = {
+                'stop_freq' : self.metadata['freq_array'][-1]/1e+6,
+                'nof_freq': self.metadata['nfreqs'],
+                'pol0_residual' : residual_delays[i]['res_pol0'],
+                'pol1_residual' : residual_delays[i]['res_pol1']
+            }
+        self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
 
 def main(args):
     
@@ -757,8 +771,12 @@ def main(args):
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
+
     if args.gendelay:
         cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+
+    if args.pub_to_redis:
+        cal_ob.pub_to_redis()
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
@@ -812,6 +830,8 @@ if __name__ == '__main__':
             help = 'If set, generate a file of output phases per antpol')
     parser.add_argument('--gendelay', action='store_true',
             help = 'If set, generate a file of output delays per antpol')
+    parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
+
     args = parser.parse_args()
     main(args)
 
