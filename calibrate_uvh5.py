@@ -69,7 +69,9 @@ class calibrate_uvh5:
         chan_width = self.uvd.channel_width
         #make some changes here, each visibiliy could have a different integration time
         intg_time = self.uvd.integration_time[0]
-        source = self.uvd.object_name
+        object_name = self.uvd.object_name.split('.')
+        source = object_name[0]
+        tuning = object_name[-1]
         telescope = self.uvd.telescope_name
         pol_array = uvutils.polnum2str(self.uvd.polarization_array)
         freq_array = self.uvd.freq_array[0,:]
@@ -91,7 +93,8 @@ class calibrate_uvh5:
         'telescope' : telescope,
         'pol_array' : pol_array,
         'freq_array' : freq_array,
-        'time_array' : time_array}
+        'time_array' : time_array,
+        'tuning' : tuning}
         return metadata
 
     def print_metadata(self):
@@ -114,7 +117,8 @@ class calibrate_uvh5:
                 No. of baselines: {meta['nbls']}  \n\
                 No. of antennas present in data: {meta['nant_data']} \n\
                 No. of antennas in the array: {meta['nant_array']} \n\
-                Antenna name: {meta['ant_names']}")
+                Antenna name: {meta['ant_names']} \n\
+                Tuning: {meta['tuning']}")
 
 
     def get_uvw_data(self):
@@ -498,14 +502,15 @@ class calibrate_uvh5:
         # Writing the delay values to a csv file
         #Opening a file to save the delays for each baselines
 
-        try:
-            tun_mnt = self.datafile.split('/')[2]
-            if tun_mnt == 'buf0':
-                tun = 'AC'
-            else:
-                tun = 'BD'
-        except:
-            tun = 'Unknown'
+        # try:
+        #     tun_mnt = self.datafile.split('/')[2]
+        #     if tun_mnt == 'buf0':
+        #         tun = 'AC'
+        #     else:
+        #         tun = 'BD'
+        # except:
+        #     tun = 'Unknown'
+        tun = self.metadata['tuning']
         outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
         dh = open(outfile_res, "w")
 
@@ -730,17 +735,45 @@ class calibrate_uvh5:
                 plt.close()    
             
 
-    def pub_to_redis(self):
-        residual_delays = pd.read_csv(self.outfile_res).to_dict('records')
-        dict_to_pub = {}
-        for i in range(len(residual_delays)):
-            dict_to_pub[residual_delays[i]['Baseline']] = {
-                'stop_freq' : self.metadata['freq_array'][-1]/1e+6,
-                'nof_freq': self.metadata['nfreqs'],
-                'pol0_residual' : residual_delays[i]['res_pol0'],
-                'pol1_residual' : residual_delays[i]['res_pol1']
-            }
-        self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
+    def pub_to_redis(self, pub_phases = False, pub_delays = False):
+        #create channel pubsub object for broadcasting changes to phases/residual-delays
+        pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
+        if pub_phases:
+            try:
+                pubsub.subscribe("gpu_calibrationphases")
+            except redis.RedisError:
+                raise redis.RedisError("""Unable to subscribe to gpu_calibrationphases channel to notify of 
+                changes to GPU_calibrationPhases changes.""")
+
+            ant_names, phase_vals = self.get_phases()
+            dict_to_pub = {}
+            for i, ant in enumerate(ant_names):
+                print(ant)
+                dict_to_pub[ant + '_' + self.metadata['tuning']] = {
+                    'freq_array' : self.metadata['freq_array'].tolist(),
+                    'pol0_phases' : phase_vals[i,0].tolist(),
+                    'pol1_phases' : phase_vals[i,1].tolist(),
+                }
+            self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
+            self.redis_obj.publish("gpu_calibrationphases", json.dumps(True))
+
+        if pub_delays:
+            try:
+                pubsub.subscribe("gpu_calibrationdelays")
+            except redis.RedisError:
+                raise redis.RedisError("""Unable to subscribe to gpu_calibrationdelays channel to notify of 
+                changes to GPU_calibrationDelays changes.""")
+
+            residual_delays = pd.read_csv(self.outfile_res).to_dict('records')
+            dict_to_pub = {}
+            for i in range(len(residual_delays)):
+                dict_to_pub[residual_delays[i]['Baseline']] = {
+                    'freq_array' : self.metadata['freq_array'].tolist(),
+                    'pol0_residual' : residual_delays[i]['res_pol0'],
+                    'pol1_residual' : residual_delays[i]['res_pol1']
+                }
+            self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
+            self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
 
 def main(args):
     
@@ -774,9 +807,6 @@ def main(args):
 
     if args.gendelay:
         cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
-
-    if args.pub_to_redis:
-        cal_ob.pub_to_redis()
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
@@ -801,6 +831,8 @@ def main(args):
         with open(outname, 'w') as fh:
             json.dump(out, fh)
 
+    if args.pub_to_redis:
+        cal_ob.pub_to_redis(pub_phases = args.genphase, pub_delays = args.gendelay)
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
