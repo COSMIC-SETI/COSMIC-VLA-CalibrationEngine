@@ -13,26 +13,10 @@ from cupy import linalg as linalg_gpu
 # Some routines to derive simple calibration solutions directly
 # from data arrays.
 
-def ant2bl(i, j=None):
-    """Returns baseline index for given antenna pair.  Will accept
-    two args, or a list/tuple/etc.  Uses 0-based indexing"""
-    if j is None:
-        (a1, a2) = sorted(i[:2])
-    else:
-        (a1, a2) = sorted((i, j))
-    # could raise error if a2==a1, either are negative, etc
-    return (a2*(a2-1))//2 + a1
-
-
-def bl2ant(i):
-    """Returns antenna pair for given baseline index.  All are 0-based."""
-    a2 = int(0.5*(1.0+np.sqrt(1.0+8.0*i)))
-    a1 = i - a2*(a2-1)//2
-    return a1, a2
 
 
 
-def gaincal_cpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
+def gaincal_cpu(data, ant_curr, ant_indices, axis=1, ref_ant=10, avg=[], nit=3):
     """Derives amplitude/phase calibration factors from the data array
     for the given baseline axis.  In the returned array, the baseline
     dimension is converted to antenna.  No other axes are modified.
@@ -43,10 +27,8 @@ def gaincal_cpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
     applied to the original data)."""
     nbl = data.shape[axis]
     ndim = len(data.shape)
-    #(check, nant) = bl2ant(nbl)
-    #print(nant)
-    #if check != 0:
-    #    raise RuntimeError("Specified axis dimension (%d) is not a valid number of baselines" % nbl)
+    nant = len(ant_curr)
+
     if avg != []:
         # Average, ignoring zeros
         #norm = np.count_nonzero(data,axis=avg,keepdims=True) # requires numpy 1.19 for keepdims
@@ -58,8 +40,6 @@ def gaincal_cpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
     tdata = np.zeros(data.shape[:axis]+data.shape[axis+1:]+(nant, nant),
                      dtype=data.dtype)
     for i in range(nbl):
-        #(a0, a1) = bl2ant(i)
-        #print(a0, a1)
         [a0, a1] = ant_indices[i]
         if a0 != a1:
             tdata[..., a0, a1] = data.take(i, axis=axis)
@@ -71,21 +51,29 @@ def gaincal_cpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
         for i in range(nant):
             tdata[..., i, i] = w*(v.real[..., i]**2 + v.imag[..., i]**2)
     
-    #(wtmp, vtmp) = linalg.eigh(tdata)
-    #v = vtmp[..., -1].copy()
-    #w = wtmp[..., -1]
-    
-    
-    # result = np.sqrt(w[...,-1]).T*v[...,-1].T
+
     result = np.sqrt(w).T*v.T
-    # First axis is now antenna.. refer all phases to reference ant
-    phi = np.angle(result[ref])
-    amp = np.abs(result[ref])
+    # refer all phases to reference ant, find it from the list
+    if ref_ant in ant_curr:
+        #Finding the index of ref antenna
+        ref_ind = np.argwhere((ant_curr == ref_ant))[0]
+        #print(ant_curr[ref_ind])
+    else:
+        print(f"The given reference antenna not in the current list of antennas, so choosing the first antenna (ea{ant_curr[0]})  in the list")
+        ref_ind = 0
+        ref_ant = ant_curr[ref_ind]
+    
+    phi = np.angle(result[ref_ind])
+    amp = np.abs(result[ref_ind])
     fac = (np.cos(phi) - 1.0j*np.sin(phi)) * (amp>0.0)
     result = (result*fac).T 
+
     # TODO try to reduce number of transposes
     outdims = list(range(axis)) + [-1, ] + list(range(axis, ndim-1))
-    return result.transpose(outdims)
+    gain = result.transpose(outdims)
+
+    gain_dict = {'antennas': ant_curr, 'ref_antenna': ref_ant, 'gain_val': gain}
+    return gain_dict
 
 def gaincal_gpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
     """Derives amplitude/phase calibration factors from the data array
@@ -99,10 +87,7 @@ def gaincal_gpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
 
     nbl = data.shape[axis]
     ndim = len(data.shape)
-    #(check, nant) = bl2ant(nbl)
-    #print(nant)
-    #if check != 0:
-    #    raise RuntimeError("Specified axis dimension (%d) is not a valid number of baselines" % nbl)
+    
     if avg != []:
         # Average, ignoring zeros
         #norm = np.count_nonzero(data,axis=avg,keepdims=True) # requires numpy 1.19 for keepdims
@@ -165,7 +150,7 @@ def gaincal_gpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
 
 
 
-def applycal(data, caldata, nant_check, ant_indices, axis=0, phaseonly=False):
+def applycal(data, gain_dict, ant_list, ant_indices, axis=0, phaseonly=False):
     """
     Apply the complex gain calibration given in the caldata array
     to the data array.  The baseline/antenna axis must be specified in
@@ -176,15 +161,32 @@ def applycal(data, caldata, nant_check, ant_indices, axis=0, phaseonly=False):
     Solutions derived from the same set of antennas must be applied to the 
     another dataset which has same set of antennas. 
     """
+    #Antenna list in the gain values
+    ant_gain  = gain_dict['antennas']
+    
+    #Gain values
+    caldata = gain_dict['gain_val']
 
     ndim = len(data.shape)
     nbl = data.shape[axis]
     nant = caldata.shape[axis]
-    #(check, nant_check) = bl2ant(nbl)
-    #if check != 0:
-    #    raise RuntimeError("Specified axis dimension (%d) is not a valid number of baselines" % nbl)
-    if nant != nant_check:
-        raise RuntimeError("Number of antennas does not match (data=%d, caldata=%d)" % (nant_check, nant))
+    
+    #Here you can apply the correction to the gain dataset to another visibility dataset
+    #only if both of them has the same set of antennas. Let's do that check here
+
+    default_val = True
+    if len(ant_gain) != len(ant_list):
+        raise RuntimeError(f"Number of antennas in gain ({len(ant_gain)}) does not match the dataset to be applied ({len(ant_list)})")
+    else:
+        for i, ant1 in enumerate(ant_gain):
+            ant2 = ant_list[i]
+            if ant1 !=  ant2:
+                default_val = False
+    
+        if not default_val:
+            raise RuntimeError("The antennas in gain solution and dataset are different")
+    #print(default_val)
+    
     if phaseonly:
         icaldata = np.abs(caldata)/caldata
     else:
@@ -197,6 +199,7 @@ def applycal(data, caldata, nant_check, ant_indices, axis=0, phaseonly=False):
         dslice = (slice(None),)*axis + (ibl,) + (slice(None),)*(ndim-axis-1)
         [a1, a2] = ant_indices[ibl]
         calfac =  icaldata.take(a1, axis=axis) * icaldata.take(a2, axis=axis).conj()
+        #print(data[dslice].shape, calfac.shape)
         data[dslice] *= calfac
 
 

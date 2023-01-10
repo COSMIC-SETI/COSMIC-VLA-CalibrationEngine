@@ -61,6 +61,7 @@ class calibrate_uvh5:
         nant_data = self.uvd.Nants_data
         nant_array = self.uvd.Nants_telescope
         ant_names = self.uvd.antenna_names
+        ant_curr = self.uvd.get_ants()
         nfreqs = self.uvd.Nfreqs
         ntimes = self.uvd.Ntimes
         npols = self.uvd.Npols
@@ -81,6 +82,7 @@ class calibrate_uvh5:
         metadata  = {'nant_data' : nant_data,
         'nant_array' : nant_array,
         'ant_names' : ant_names, 
+        'ant_curr' : ant_curr
         'nfreqs' : nfreqs,
         'ntimes' : ntimes,
         'npols': npols,
@@ -116,6 +118,7 @@ class calibrate_uvh5:
                 Data array shape: {self.vis_data.shape} \n\
                 No. of baselines: {meta['nbls']}  \n\
                 No. of antennas present in data: {meta['nant_data']} \n\
+                Current antenna list in the data: {meta['ant_curr']} \n\
                 No. of antennas in the array: {meta['nant_array']} \n\
                 Antenna name: {meta['ant_names']} \n\
                 Tuning: {meta['tuning']}")
@@ -171,22 +174,22 @@ class calibrate_uvh5:
         print("Deriving Calibrations now")
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
-        gainsol = gaincal_cpu(self.vis_data, self.metadata['nant_data'], self.ant_indices,  axis = 0, ref = 0)
-
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = 10)
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
 
-        print(f"Solution shape: {gainsol.shape}")
+        print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
         
-        return gainsol
+        return gainsol_dict
 
     def apply_phase(self, gainsol):
         """
-        Apply the derived gains to the same dataset.
-        Little problematic if input and output shape are different
+        Apply the derived gains to a UVH5 dataset. 
+        Also the antenna list in gain has to match with the new dataset, otherwise applying the gains to the
+        correlated matrix would be difficult
         """
         data_cp = self.vis_data.copy()
-        applycal(data_cp, gainsol, self.metadata['nant_data'], self.ant_indices, axis=0, phaseonly=False)
+        applycal(data_cp, gain_dict, self.metadata['ant_curr'], self.ant_indices, axis=0, phaseonly=False)
         print(self.vis_data.dtype)
         return data_cp
     
@@ -215,7 +218,7 @@ class calibrate_uvh5:
         return ant_indices
 
 
-    def plot_gain_phases_amp(self, gain, outdir, plot_amp = False):
+    def plot_gain_phases_amp(self, gain_dict, outdir, plot_amp = False):
 
         """
         Plots the amplitude and phase (averaged over time) across frequency for a gain solutions (antenna, times, frequency, pols)
@@ -223,8 +226,11 @@ class calibrate_uvh5:
         
         print("plotting gain phase & amp vs freq ")
         
+        gain_ant= gain_dict['antennas']
+        gain = gain_dict['gain_val']
+
         gain_avg = np.squeeze(np.mean(gain, axis=1))
-        nant = self.metadata['nant_data']
+        nant = len(gain_ant)
 
         grid_x = 6
         grid_y = 5
@@ -250,8 +256,7 @@ class calibrate_uvh5:
                         axs[i,j].plot(self.metadata['freq_array']/1e+9, np.angle(gain_rr, deg = True), '.',  label = "RR")
                         axs[i,j].plot(self.metadata['freq_array']/1e+9, np.angle(gain_ll, deg = True), '.',  label = "LL")
 
-                    
-                        #axs[i,j].set_title(f"ea{ant1[bl]} - ea{ant2[bl]}")
+                        axs[i,j].set_title(f"ea{gain_ant[bl]}")                    
                         axs[i,j].legend(loc = 'upper right')
             
             fig.suptitle("Gain: Phase vs Freq (averaged in time), RR, LL")
@@ -282,7 +287,7 @@ class calibrate_uvh5:
                             axs[i,j].plot(self.metadata['freq_array']/1e+9, np.abs(gain_rr), '.',  label = "RR")
                             axs[i,j].plot(self.metadata['freq_array']/1e+9, np.abs(gain_ll), '.',  label = "LL")
 
-                            #axs[i,j].set_title(f"ea{ant1[bl]} - ea{ant2[bl]}")
+                            axs[i,j].set_title(f"ea{gain_ant[bl]}")
                             axs[i,j].legend(loc = 'upper right')
            
                 
@@ -810,6 +815,11 @@ def main(args):
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
+    
+    #The gain dictinary obtained from sdmpy
+    # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
+    gain_dict = cal_ob.derive_phase()
+
     if args.genphase:
         #gain = cal_ob.derive_phase() # An antenna x time x channel x ?cross-pol?
         ## Assume we have legit phase tracking and little transient RFI
