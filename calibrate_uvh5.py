@@ -82,7 +82,7 @@ class calibrate_uvh5:
         metadata  = {'nant_data' : nant_data,
         'nant_array' : nant_array,
         'ant_names' : ant_names, 
-        'ant_curr' : ant_curr
+        'ant_curr' : ant_curr,
         'nfreqs' : nfreqs,
         'ntimes' : ntimes,
         'npols': npols,
@@ -165,7 +165,7 @@ class calibrate_uvh5:
         return self.uvd.write_ms(outfile)
 
 
-    def derive_phase(self):
+    def derive_phase(self, outdir):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
@@ -175,12 +175,39 @@ class calibrate_uvh5:
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
         gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = 10)
+        gain = np.squeeze(gainsol_dict['gain_val'])
+        gain_ant = gainsol_dict['antennas']
+        
+        #for i in range(1,29):
+        #    ant = "ea"+str(i).zfill(2)
+        #    json_gain_dict['ant_gains'][ant] = {}
+
+        json_gain_dict = {'gains':{}, 'freqs_hz': self.metadata['freq_array'].tolist()}
+               
+        
+        
+        #Let's go through each antenna in the gain antenna list and update the gain values
+        for i, ant in enumerate(gain_ant):
+            ant_str = "ea"+str(ant).zfill(2)
+            json_gain_dict['gains'][ant_str] = {}
+            json_gain_dict['gains'][ant_str]['gain_pol0'] = gain[i, :, 0]
+            json_gain_dict['gains'][ant_str]['gain_pol1'] = gain[i, :, 3]
+        
+        
+
+        #Writting the dictionary as a json file
+        outfile_json = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"gain_dict.json")
+
+        #print("Writing our the gains per antenna/freq/pols")
+        #with open(outfile_json, "w") as jh:
+        #    json.dump(json_gain_dict, jh)
+
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
 
         print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
         
-        return gainsol_dict
+        return json_gain_dict
 
     def apply_phase(self, gainsol):
         """
@@ -739,7 +766,7 @@ class calibrate_uvh5:
                 plt.savefig(outfile_peak, dpi = 150)
                 plt.close()    
             
-
+    
     def pub_to_redis(self, pub_phases = False, pub_delays = False):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
@@ -779,6 +806,7 @@ class calibrate_uvh5:
                 }
             self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
             self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
+    
 
 def main(args):
     
@@ -818,7 +846,10 @@ def main(args):
     
     #The gain dictinary obtained from sdmpy
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
-    gain_dict = cal_ob.derive_phase()
+    if args.gengain:
+
+        gdict = cal_ob.derive_phase(args.out_dir)
+        #print(gdict)
 
     if args.genphase:
         #gain = cal_ob.derive_phase() # An antenna x time x channel x ?cross-pol?
@@ -855,7 +886,7 @@ def main(args):
     #In that case a create a different object of the same class withe the apply_dat_file
     # Creating an object with the datset to apply the solutions, apply the solutions and plot the phase and amp
     #cal_apply_ob = calibrate_uvh5(args.apply_dat_file)
-    #cal_data_apply = cal_apply_ob.apply_phase(gain) #Gain derived from a different file
+    #cal_data_apply = cal_apply_ob.apply_phase(gain_dict) #Gain derived from a different file
     #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
     
     
@@ -868,6 +899,8 @@ if __name__ == '__main__':
     parser.add_argument('-d','--dat_file', type = str, required = True, help = 'UVH5 file to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
+    parser.add_argument('--gengain', action='store_true',
+            help = 'If set, generate a json file of output gain per antenna/freq/pol')
     parser.add_argument('--genphase', action='store_true',
             help = 'If set, generate a file of output phases per antpol')
     parser.add_argument('--gendelay', action='store_true',
