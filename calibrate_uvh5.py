@@ -10,7 +10,6 @@ import time
 import json
 import numpy as np
 import pandas as pd
-import json
 import redis
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
@@ -190,17 +189,19 @@ class calibrate_uvh5:
         for i, ant in enumerate(gain_ant):
             ant_str = "ea"+str(ant).zfill(2)
             json_gain_dict['gains'][ant_str] = {}
-            json_gain_dict['gains'][ant_str]['gain_pol0'] = gain[i, :, 0]
-            json_gain_dict['gains'][ant_str]['gain_pol1'] = gain[i, :, 3]
+            json_gain_dict['gains'][ant_str]['gain_pol0_real'] = gain[i, :, 0].real.tolist()
+            json_gain_dict['gains'][ant_str]['gain_pol0_imag'] = gain[i, :, 0].imag.tolist()
+            json_gain_dict['gains'][ant_str]['gain_pol1.real'] = gain[i, :, 3].real.tolist()
+            json_gain_dict['gains'][ant_str]['gain_pol1.imag'] = gain[i, :, 3].imag.tolist()
         
         
 
         #Writting the dictionary as a json file
-        outfile_json = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"gain_dict.json")
+        outfile_json = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_gain_dict.json")
 
-        #print("Writing our the gains per antenna/freq/pols")
-        #with open(outfile_json, "w") as jh:
-        #    json.dump(json_gain_dict, jh)
+        print("Writing our the gains per antenna/freq/pols")
+        with open(outfile_json, "w") as jh:
+            json.dump(json_gain_dict, jh)
 
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
