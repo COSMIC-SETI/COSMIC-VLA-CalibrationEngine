@@ -769,7 +769,7 @@ class calibrate_uvh5:
                 plt.close()    
             
     
-    def pub_to_redis(self, phase_outfile = None, delays_outfile = None):
+    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, filestem = ""):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
         if phase_outfile is not None:
@@ -792,6 +792,7 @@ class calibrate_uvh5:
                     'pol1_phases' : phase_vals_1[i]
                 }
             self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
+            self.redis_obj.hset("GPU_calibrationPhases", "filestem", filestem)
             self.redis_obj.publish("gpu_calibrationphases", json.dumps(True))
 
         if delays_outfile is not None:
@@ -810,6 +811,7 @@ class calibrate_uvh5:
                     'pol1_residual' : residual_delays[i]['res_pol1']
                 }
             self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
+            self.redis_obj.hset("GPU_calibrationDelays", "filestem", filestem)
             self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
     
 
@@ -880,7 +882,7 @@ def main(args):
             json.dump(out, fh)
             
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays)
+        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, filestem = os.path.basename(args.dat_file))
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
