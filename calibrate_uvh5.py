@@ -191,8 +191,8 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str] = {}
             json_gain_dict['gains'][ant_str]['gain_pol0_real'] = gain[i, :, 0].real.tolist()
             json_gain_dict['gains'][ant_str]['gain_pol0_imag'] = gain[i, :, 0].imag.tolist()
-            json_gain_dict['gains'][ant_str]['gain_pol1.real'] = gain[i, :, 3].real.tolist()
-            json_gain_dict['gains'][ant_str]['gain_pol1.imag'] = gain[i, :, 3].imag.tolist()
+            json_gain_dict['gains'][ant_str]['gain_pol1_real'] = gain[i, :, 3].real.tolist()
+            json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
         
         
 
