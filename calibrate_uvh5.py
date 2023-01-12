@@ -601,6 +601,7 @@ class calibrate_uvh5:
             
 
         dh.close()
+        return outfile_res
 
     def get_phases(self, ref_ant = 'ea10'):
 
@@ -768,36 +769,39 @@ class calibrate_uvh5:
                 plt.close()    
             
     
-    def pub_to_redis(self, pub_phases = False, pub_delays = False):
+    def pub_to_redis(self, phase_outfile = None, delays_outfile = None):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
-        if pub_phases:
+        if phase_outfile is not None:
             try:
                 pubsub.subscribe("gpu_calibrationphases")
             except redis.RedisError:
                 raise redis.RedisError("""Unable to subscribe to gpu_calibrationphases channel to notify of 
                 changes to GPU_calibrationPhases changes.""")
+            with open(phase_outfile) as f:
+                phase_dict = json.load(f)
+            ant_names = phase_dict['ant_names']
+            phase_vals_0 = phase_dict['phases_pol0']
+            phase_vals_1 = phase_dict['phases_pol1']
 
-            ant_names, phase_vals = self.get_phases()
             dict_to_pub = {}
             for i, ant in enumerate(ant_names):
-                print(ant)
-                dict_to_pub[ant + '_' + self.metadata['tuning']] = {
-                    'freq_array' : self.metadata['freq_array'].tolist(),
-                    'pol0_phases' : phase_vals[i,0].tolist(),
-                    'pol1_phases' : phase_vals[i,1].tolist(),
+                dict_to_pub[ant] = {
+                    'freq_array' : phase_dict['freqs_hz'],
+                    'pol0_phases' : phase_vals_0[i],
+                    'pol1_phases' : phase_vals_1[i]
                 }
             self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6), json.dumps(dict_to_pub))
             self.redis_obj.publish("gpu_calibrationphases", json.dumps(True))
 
-        if pub_delays:
+        if delays_outfile is not None:
             try:
                 pubsub.subscribe("gpu_calibrationdelays")
             except redis.RedisError:
                 raise redis.RedisError("""Unable to subscribe to gpu_calibrationdelays channel to notify of 
                 changes to GPU_calibrationDelays changes.""")
 
-            residual_delays = pd.read_csv(self.outfile_res).to_dict('records')
+            residual_delays = pd.read_csv(delays_outfile).to_dict('records')
             dict_to_pub = {}
             for i in range(len(residual_delays)):
                 dict_to_pub[residual_delays[i]['Baseline']] = {
@@ -811,6 +815,8 @@ class calibrate_uvh5:
 
 def main(args):
     
+    outfile_phase, outfile_delays = (None, None)
+
     # Creating an object with the input data file from solutions needed to be derived
     cal_ob = calibrate_uvh5(args.dat_file)
     
@@ -840,7 +846,7 @@ def main(args):
     #Calculate the delays and spit out the delay values per baseline in the out_dir
 
     if args.gendelay:
-        cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
@@ -869,12 +875,12 @@ def main(args):
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outname = os.path.join(args.out_dir, os.path.basename(args.dat_file) + '_phasecal.json')
-        with open(outname, 'w') as fh:
+        outfile_phase = os.path.join(args.out_dir, os.path.basename(args.dat_file) + '_phasecal.json')
+        with open(outfile_phase, 'w') as fh:
             json.dump(out, fh)
-
+            
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(pub_phases = args.genphase, pub_delays = args.gendelay)
+        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays)
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
