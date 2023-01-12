@@ -791,9 +791,9 @@ class calibrate_uvh5:
                     'pol0_phases' : phase_vals_0[i],
                     'pol1_phases' : phase_vals_1[i]
                 }
-            self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6+","+self.metadata["tuning"]), json.dumps(dict_to_pub))
+            self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
             self.redis_obj.hset("GPU_calibrationPhases", "filestem", filestem)
-            self.redis_obj.publish("gpu_calibrationphases", str(self.metadata['freq_array'][0]/1e+6+","+self.metadata["tuning"]))
+            self.redis_obj.publish("gpu_calibrationphases", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"])
 
         if delays_outfile is not None:
             try:
