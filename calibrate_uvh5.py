@@ -772,7 +772,7 @@ class calibrate_uvh5:
     def pub_to_redis(self, phase_outfile = None, delays_outfile = None, gains_outfile = None, filestem = ""):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
-        filestem = filestem.split('.')[0]
+        filestem = os.path.splitext(filestem)[0]
         if phase_outfile is not None:
             try:
                 pubsub.subscribe("gpu_calibrationphases")
