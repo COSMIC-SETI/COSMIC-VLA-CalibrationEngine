@@ -208,7 +208,7 @@ class calibrate_uvh5:
 
         print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
         
-        return json_gain_dict
+        return outfile_json
 
     def apply_phase(self, gainsol):
         """
@@ -769,7 +769,7 @@ class calibrate_uvh5:
                 plt.close()    
             
     
-    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, filestem = ""):
+    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, gains_outfile = None, filestem = ""):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
         filestem = filestem.split('.')[0]
@@ -792,10 +792,9 @@ class calibrate_uvh5:
                     'pol0_phases' : phase_vals_0[i],
                     'pol1_phases' : phase_vals_1[i]
                 }
+            dict_to_pub['filestem'] = filestem
             self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
-            self.redis_obj.hset("GPU_calibrationPhases", "filestem", filestem)
-            self.redis_obj.hset("GPU_calibrationPhases", "timestamp", time.ctime())
-            self.redis_obj.publish("gpu_calibrationphases", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"])
+            self.redis_obj.publish("gpu_calibrationphases", json.dumps(True))
 
         if delays_outfile is not None:
             try:
@@ -808,19 +807,28 @@ class calibrate_uvh5:
             dict_to_pub = {}
             for i in range(len(residual_delays)):
                 dict_to_pub[residual_delays[i]['Baseline']] = {
-                    'freq_array' : self.metadata['freq_array'].tolist(),
                     'pol0_residual' : residual_delays[i]['res_pol0'],
                     'pol1_residual' : residual_delays[i]['res_pol1']
                 }
-            self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6+","+self.metadata["tuning"]), json.dumps(dict_to_pub))
-            self.redis_obj.hset("GPU_calibrationDelays", "filestem", filestem)
-            self.redis_obj.hset("GPU_calibrationPhases", "timestamp", time.ctime())
-            self.redis_obj.publish("gpu_calibrationdelays", str(self.metadata['freq_array'][0]/1e+6+","+self.metadata["tuning"]))
-    
+            dict_to_pub['filestem'] = filestem
+            self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
+            self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
+
+        if gains_outfile is not None:
+            try:
+                pubsub.subscribe("gpu_calibrationgains")
+            except redis.RedisError:
+                raise redis.RedisError("""Unable to subscribe to gpu_calibrationdelays channel to notify of 
+                changes to GPU_calibrationDelays changes.""")
+            with open(gains_outfile) as f:
+                residual_gains = json.load(f)
+            residual_gains['filestem'] = filestem
+            self.redis_obj.hset("GPU_calibrationGains", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(residual_gains))
+            self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
 def main(args):
     
-    outfile_phase, outfile_delays = (None, None)
+    outfile_phase, outfile_delays, outfile_gains = (None, None, None)
 
     # Creating an object with the input data file from solutions needed to be derived
     cal_ob = calibrate_uvh5(args.dat_file)
@@ -860,19 +868,9 @@ def main(args):
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
 
-        gdict = cal_ob.derive_phase(args.out_dir)
-        #print(gdict)
+        outfile_gains = cal_ob.derive_phase(args.out_dir)
 
     if args.genphase:
-        #gain = cal_ob.derive_phase() # An antenna x time x channel x ?cross-pol?
-        ## Assume we have legit phase tracking and little transient RFI
-        #gain_av = gain.mean(axis=1) # average_over_time
-        #out = {
-        #    'ant_names': metadata['ant_names'],
-        #    'freqs_hz': metadata['freq_array'].tolist(),
-        #    'phases_pol0': np.angle(gain_av[:,:,0]).tolist(),
-        #    'phases_pol1': np.angle(gain_av[:,:,3]).tolist(),
-        #}
         antnames, phases = cal_ob.get_phases() # An antenna x time x channel x ?cross-pol?
         out = {
             'ant_names': antnames,
@@ -885,7 +883,7 @@ def main(args):
             json.dump(out, fh)
             
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, filestem = os.path.basename(args.dat_file))
+        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, gains_outfile = outfile_gains, filestem = os.path.basename(args.dat_file))
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
