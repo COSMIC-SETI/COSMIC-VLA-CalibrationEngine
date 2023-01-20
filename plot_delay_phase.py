@@ -53,15 +53,10 @@ def plot_delay_phase(args):
 
     fig, ax = plt.subplots(constrained_layout=True, figsize = (10,6))
 
-    for i in range(4):
-        if i == 0:
-            ax.plot(delay_dat[:,i], '.',  label = "AC0")
-        elif i == 1:
-            ax.plot(delay_dat[:,i], '.',  label = "AC1")
-        elif i == 2:
-            ax.plot(delay_dat[:,i], '.',  label = "BD0")
-        else:
-            ax.plot(delay_dat[:,i], '.',  label = "BD1")
+    ax.plot(delay_dat[:,0], '.',  label = "AC0")
+    ax.plot(delay_dat[:,1], '.',  label = "AC1")
+    ax.plot(delay_dat[:,2], '.',  label = "BD0")
+    ax.plot(delay_dat[:,3], '.',  label = "BD1")
 
     ax.set_title("Residual Delays vs Antennas")
     ax.legend(loc = 'upper right')
