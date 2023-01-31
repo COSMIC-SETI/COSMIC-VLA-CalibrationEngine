@@ -70,8 +70,10 @@ class calibrate_uvh5:
         #make some changes here, each visibiliy could have a different integration time
         intg_time = self.uvd.integration_time[0]
         object_name = self.uvd.object_name.split('.')
-        source = object_name[0]
-        tuning = object_name[-1]
+        extra_keywords = self.uvd.extra_keywords
+        source = object_name
+        tuning = extra_keywords['Tuning']
+        obs_id = extra_keywords['ObservationID']
         telescope = self.uvd.telescope_name
         pol_array = uvutils.polnum2str(self.uvd.polarization_array)
         freq_array = self.uvd.freq_array[0,:]
@@ -95,7 +97,8 @@ class calibrate_uvh5:
         'pol_array' : pol_array,
         'freq_array' : freq_array,
         'time_array' : time_array,
-        'tuning' : tuning}
+        'tuning' : tuning,
+        'obs_id' : obs_id}
         return metadata
 
     def print_metadata(self):
@@ -769,10 +772,9 @@ class calibrate_uvh5:
                 plt.close()    
             
     
-    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, gains_outfile = None, filestem = ""):
+    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, gains_outfile = None):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
-        filestem = os.path.splitext(filestem)[0]
         if phase_outfile is not None:
             try:
                 pubsub.subscribe("gpu_calibrationphases")
@@ -792,7 +794,7 @@ class calibrate_uvh5:
                     'pol0_phases' : phase_vals_0[i],
                     'pol1_phases' : phase_vals_1[i]
                 }
-            dict_to_pub['filestem'] = filestem
+            dict_to_pub['obs_id'] = self.metadata['obs_id']
             self.redis_obj.hset("GPU_calibrationPhases", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
             self.redis_obj.publish("gpu_calibrationphases", json.dumps(True))
 
@@ -810,7 +812,7 @@ class calibrate_uvh5:
                     'pol0_residual' : residual_delays[i]['res_pol0'],
                     'pol1_residual' : residual_delays[i]['res_pol1']
                 }
-            dict_to_pub['filestem'] = filestem
+            dict_to_pub['obs_id'] = self.metadata['obs_id']
             self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
             self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
 
@@ -822,7 +824,7 @@ class calibrate_uvh5:
                 changes to GPU_calibrationDelays changes.""")
             with open(gains_outfile) as f:
                 residual_gains = json.load(f)
-            residual_gains['filestem'] = filestem
+            residual_gains['obs_id'] = self.metadata['obs_id']
             self.redis_obj.hset("GPU_calibrationGains", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(residual_gains))
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
@@ -883,7 +885,7 @@ def main(args):
             json.dump(out, fh)
             
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, gains_outfile = outfile_gains, filestem = os.path.basename(args.dat_file))
+        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, gains_outfile = outfile_gains)
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
