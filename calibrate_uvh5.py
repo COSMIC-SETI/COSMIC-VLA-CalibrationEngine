@@ -200,7 +200,7 @@ class calibrate_uvh5:
         
 
         #Writting the dictionary as a json file
-        outfile_json = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_gain_dict.json")
+        outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
         print("Writing our the gains per antenna/freq/pols")
         with open(outfile_json, "w") as jh:
@@ -547,7 +547,7 @@ class calibrate_uvh5:
         # except:
         #     tun = 'Unknown'
         tun = self.metadata['tuning']
-        outfile_res = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_res_delay_{tun}.csv")
+        outfile_res = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0]+ f"_res_delay_{tun}.csv")
         dh = open(outfile_res, "w")
 
         dh.write(",".join(
@@ -880,7 +880,7 @@ def main(args):
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outfile_phase = os.path.join(args.out_dir, os.path.basename(args.dat_file) + '_phasecal.json')
+        outfile_phase = os.path.join(args.out_dir, os.path.splitext(os.path.basename(self.datafile))[0] + '_phasecal.json')
         with open(outfile_phase, 'w') as fh:
             json.dump(out, fh)
             
