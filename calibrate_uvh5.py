@@ -10,7 +10,7 @@ import time
 import json
 import numpy as np
 import pandas as pd
-import redis
+from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
@@ -40,7 +40,7 @@ def flag_spectrum(spectrum, win, threshold = 3):
 
 class calibrate_uvh5:
 
-    def __init__(self, datafile):
+    def __init__(self, datafile, redis_obj):
 
         #Initializing the pyuvdata object and reading the files
         self.datafile = datafile
@@ -49,7 +49,7 @@ class calibrate_uvh5:
         self.metadata = self.get_metadata()
         self.vis_data = self.get_vis_data_new()
         self.ant_indices = self.get_ant_array_indices()
-        self.redis_obj = redis.Redis(host="redishost", decode_responses=True)
+        self.redis_obj = redis_obj
 
     def get_metadata(self):
         """
@@ -824,7 +824,7 @@ class calibrate_uvh5:
                 changes to GPU_calibrationDelays changes.""")
             with open(gains_outfile) as f:
                 residual_gains = json.load(f)
-            self.redis_obj.hset("GPU_calibrationGains", mapping = json.dumps(residual_gains))
+            redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", residual_gains)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
 def main(args):
@@ -832,7 +832,7 @@ def main(args):
     outfile_phase, outfile_delays, outfile_gains = (None, None, None)
 
     # Creating an object with the input data file from solutions needed to be derived
-    cal_ob = calibrate_uvh5(args.dat_file)
+    cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
     #Print the metdata of the input file
     cal_ob.print_metadata()
