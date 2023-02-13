@@ -196,15 +196,15 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str]['gain_pol0_imag'] = gain[i, :, 0].imag.tolist()
             json_gain_dict['gains'][ant_str]['gain_pol1_real'] = gain[i, :, 3].real.tolist()
             json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
-        
-        
-
+        json_gain_dict['obs_id'] = self.metadata['obs_id']
+        write_out_dict = {}
+        write_out_dict[str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
         #Writting the dictionary as a json file
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
         print("Writing our the gains per antenna/freq/pols")
         with open(outfile_json, "w") as jh:
-            json.dump(json_gain_dict, jh)
+            json.dump(write_out_dict, jh)
 
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
@@ -824,8 +824,7 @@ class calibrate_uvh5:
                 changes to GPU_calibrationDelays changes.""")
             with open(gains_outfile) as f:
                 residual_gains = json.load(f)
-            residual_gains['obs_id'] = self.metadata['obs_id']
-            self.redis_obj.hset("GPU_calibrationGains", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(residual_gains))
+            self.redis_obj.hset("GPU_calibrationGains", mapping = json.dumps(residual_gains))
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
 def main(args):
