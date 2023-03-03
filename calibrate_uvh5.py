@@ -10,6 +10,7 @@ import time
 import json
 import numpy as np
 import pandas as pd
+import redis
 from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
@@ -56,74 +57,53 @@ class calibrate_uvh5:
         Reading the metadata from the uvh5 object 
         and adding them to a dictionary
         """
-
-        nant_data = self.uvd.Nants_data
-        nant_array = self.uvd.Nants_telescope
-        ant_names = self.uvd.antenna_names
-        ant_curr = self.uvd.get_ants()
-        nfreqs = self.uvd.Nfreqs
-        ntimes = self.uvd.Ntimes
-        npols = self.uvd.Npols
-        bls = self.uvd.Nbls
-        nspws = self.uvd.Nspws
-        chan_width = self.uvd.channel_width
         #make some changes here, each visibiliy could have a different integration time
-        intg_time = self.uvd.integration_time[0]
-        object_name = self.uvd.object_name.split('.')
         extra_keywords = self.uvd.extra_keywords
-        source = object_name
-        tuning = extra_keywords['Tuning']
-        obs_id = extra_keywords['ObservationID']
-        telescope = self.uvd.telescope_name
-        pol_array = uvutils.polnum2str(self.uvd.polarization_array)
-        freq_array = self.uvd.freq_array[0,:]
-        lobs = ntimes*intg_time
         
-        time_array = np.arange(ntimes)*intg_time
-        metadata  = {'nant_data' : nant_data,
-        'nant_array' : nant_array,
-        'ant_names' : ant_names, 
-        'ant_curr' : ant_curr,
-        'nfreqs' : nfreqs,
-        'ntimes' : ntimes,
-        'npols': npols,
-        'nbls' : bls,
-        'nspws' : nspws,
-        'chan_width': chan_width,
-        'intg_time' : intg_time,
-        'lobs' : lobs,
-        'source': source,
-        'telescope' : telescope,
-        'pol_array' : pol_array,
-        'freq_array' : freq_array,
+        time_array = np.arange(self.uvd.Ntimes)*self.uvd.integration_time[0]
+        metadata  = {'nant_data' : self.uvd.Nants_data,
+        'nant_array' : self.uvd.Nants_telescope,
+        'ant_names' : self.uvd.antenna_names, 
+        'ant_curr' : self.uvd.get_ants(),
+        'nfreqs' : self.uvd.Nfreqs,
+        'ntimes' : self.uvd.Ntimes,
+        'npols': self.uvd.Npols,
+        'nbls' : self.uvd.Nbls,
+        'nspws' : self.uvd.Nspws,
+        'chan_width': self.uvd.channel_width,
+        'intg_time' : self.uvd.integration_time[0],
+        'lobs' : self.uvd.Ntimes*self.uvd.integration_time[0],
+        'source': self.uvd.object_name.split('.'),
+        'telescope' : self.uvd.telescope_name,
+        'pol_array' : uvutils.polnum2str(self.uvd.polarization_array),
+        'freq_array' : self.uvd.freq_array[0,:],
         'time_array' : time_array,
-        'tuning' : tuning,
-        'obs_id' : obs_id}
+        'tuning' : extra_keywords['Tuning'],
+        'obs_id' : extra_keywords['ObservationID']}
         return metadata
 
     def print_metadata(self):
         #Print out the observation details
-        
-        meta = self.metadata
-        print(f" Observations from {meta['telescope']}: \n\
-                Source observed: {meta['source']} \n\
-                No. of time integrations: {meta['ntimes']} \n\
-                Length of time integration: {meta['intg_time']} s \n\
-                Length of observations: {meta['lobs']} s \n\
-                No. of frequency channels: {meta['nfreqs']} \n\
-                Width of frequency channel: {meta['chan_width']/1e+3} kHz\n\
-                Start freq: {meta['freq_array'][0]/1e+6} MHz, Stop freq: {meta['freq_array'][-1]/1e+6} MHz \n\
-                Observation bandwidth: {(meta['freq_array'][-1] - meta['freq_array'][0])/1e+6} MHz \n\
-                No. of spectral windows: {meta['nspws']}  \n\
-                Polarization array: {meta['pol_array']} \n\
-                No. of polarizations: {meta['npols']}   \n\
+
+        print(f" Observations from {self.metadata['telescope']}: \n\
+                Source observed: {self.metadata['source']} \n\
+                No. of time integrations: {self.metadata['ntimes']} \n\
+                Length of time integration: {self.metadata['intg_time']} s \n\
+                Length of observations: {self.metadata['lobs']} s \n\
+                No. of frequency channels: {self.metadata['nfreqs']} \n\
+                Width of frequency channel: {self.metadata['chan_width']/1e+3} kHz\n\
+                Start freq: {self.metadata['freq_array'][0]/1e+6} MHz, Stop freq: {self.metadata['freq_array'][-1]/1e+6} MHz \n\
+                Observation bandwidth: {(self.metadata['freq_array'][-1] - self.metadata['freq_array'][0])/1e+6} MHz \n\
+                No. of spectral windows: {self.metadata['nspws']}  \n\
+                Polarization array: {self.metadata['pol_array']} \n\
+                No. of polarizations: {self.metadata['npols']}   \n\
                 Data array shape: {self.vis_data.shape} \n\
-                No. of baselines: {meta['nbls']}  \n\
-                No. of antennas present in data: {meta['nant_data']} \n\
-                Current antenna list in the data: {meta['ant_curr']} \n\
-                No. of antennas in the array: {meta['nant_array']} \n\
-                Antenna name: {meta['ant_names']} \n\
-                Tuning: {meta['tuning']}")
+                No. of baselines: {self.metadata['nbls']}  \n\
+                No. of antennas present in data: {self.metadata['nant_data']} \n\
+                Current antenna list in the data: {self.metadata['ant_curr']} \n\
+                No. of antennas in the array: {self.metadata['nant_array']} \n\
+                Antenna name: {self.metadata['ant_names']} \n\
+                Tuning: {self.metadata['tuning']}")
 
 
     def get_uvw_data(self):
@@ -220,7 +200,7 @@ class calibrate_uvh5:
         correlated matrix would be difficult
         """
         data_cp = self.vis_data.copy()
-        applycal(data_cp, gain_dict, self.metadata['ant_curr'], self.ant_indices, axis=0, phaseonly=False)
+        applycal(data_cp, gainsol, self.metadata['ant_curr'], self.ant_indices, axis=0, phaseonly=False)
         print(self.vis_data.dtype)
         return data_cp
     
@@ -412,7 +392,7 @@ class calibrate_uvh5:
                 plt.savefig(outfile, dpi = 150)
                 plt.close()
             
-    def plot_phases_waterflall(self, data, outdir, track_phase = False):
+    def plot_phases_waterfall(self, data, outdir, track_phase = False):
 
         """
         Make waterfall plots of phases from the visibility dataset
@@ -646,7 +626,7 @@ class calibrate_uvh5:
         return ant_names, phase_vals
 
 
-    def plot_delays_waterflall(self, data, outdir, track_delay = True):
+    def plot_delays_waterfall(self, data, outdir, track_delay = True):
         
         data = np.squeeze(data) # removing redundant axis
         
@@ -836,7 +816,6 @@ def main(args):
     
     #Print the metdata of the input file
     cal_ob.print_metadata()
-    metadata = cal_ob.get_metadata()
 
     #Uncomment the following lines depending on the tasks to be completed
 
@@ -851,7 +830,7 @@ def main(args):
     #cal_ob.plot_phases_vs_freq(cal_ob.vis_data, args.out_dir, plot_amp = True)
     
     #plot the Phase waterfall plots of the visibility
-    #cal_ob.plot_phases_waterflall(cal_ob.vis_data, args.out_dir, track_phase = True)
+    # cal_ob.plot_phases_waterfall(cal_ob.vis_data, args.out_dir, track_phase = True)
 
     #plot the Delay waterfall plots of the visibility
     #cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
@@ -875,11 +854,11 @@ def main(args):
         antnames, phases = cal_ob.get_phases() # An antenna x time x channel x ?cross-pol?
         out = {
             'ant_names': antnames,
-            'freqs_hz': metadata['freq_array'].tolist(),
+            'freqs_hz': cal_ob.metadata['freq_array'].tolist(),
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outfile_phase = os.path.join(args.out_dir, os.path.splitext(os.path.basename(self.datafile))[0] + '_phasecal.json')
+        outfile_phase = os.path.join(args.out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
         with open(outfile_phase, 'w') as fh:
             json.dump(out, fh)
             
