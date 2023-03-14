@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.stats import median_absolute_deviation as mad
+from scipy.stats import median_abs_deviation as mad
 
 
 def flag_rfi(data, winSize, clip=3):
