@@ -896,8 +896,11 @@ if __name__ == '__main__':
     parser.add_argument('--gendelay', action='store_true',
             help = 'If set, generate a file of output delays per antpol')
     parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
-
     args = parser.parse_args()
+
+    if not os.path.exists(args.out_dir):
+        os.makedirs(args.out_dir)
+
     main(args)
 
 
