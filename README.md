@@ -15,3 +15,5 @@ In production, `calibrate_uvh5.py` is run by the [postprocessor](https://github.
 ```python calibrate_uvh5.py -d path/to/uvh5file -o path/to/where/gains/are/logged --gengain --pub-to-redis```
 
 This script contains code to produce diagnostic plots from the ingested uvh5 file but at present these are not available through arguments (TODO).
+
+sliding_rfi_flagger: Given a spectra, the code utilizes a sliding median window which move across the data to create a smooth bandpass model. The smooth bandpass model will subtracted from the data to search for RFI signals greater than a threshold. The code works best to remove narrowband RFI signals. The sliding window size and threshold detection can be modified. This is used to avoid bad RFI channels while calibrating the data.
