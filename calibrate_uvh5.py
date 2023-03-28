@@ -11,6 +11,7 @@ import json
 import numpy as np
 import pandas as pd
 import redis
+import shutil
 from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
@@ -815,7 +816,7 @@ def main(args):
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
     #Print the metdata of the input file
-    cal_ob.print_metadata()
+    # cal_ob.print_metadata()
 
     #Uncomment the following lines depending on the tasks to be completed
 
@@ -838,8 +839,13 @@ def main(args):
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
 
+    out_dir = os.path.join(args.out_dir, "calibration_gains")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
     if args.gendelay:
-        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, args.out_dir)
+        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir)
+        shutil.chown(outfile_delays, "cosmic", "cosmic")
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Derive the gain solutions from the visibility data
@@ -848,7 +854,8 @@ def main(args):
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
 
-        outfile_gains = cal_ob.derive_phase(args.out_dir)
+        outfile_gains = cal_ob.derive_phase(out_dir)
+        shutil.chown(outfile_gains, "cosmic", "cosmic")
 
     if args.genphase:
         antnames, phases = cal_ob.get_phases() # An antenna x time x channel x ?cross-pol?
@@ -858,9 +865,10 @@ def main(args):
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outfile_phase = os.path.join(args.out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
+        outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
         with open(outfile_phase, 'w') as fh:
             json.dump(out, fh)
+        shutil.chown(outfile_phase, "cosmic", "cosmic")
             
     if args.pub_to_redis:
         cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, gains_outfile = outfile_gains)
@@ -898,8 +906,12 @@ if __name__ == '__main__':
     parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
     args = parser.parse_args()
 
-    if not os.path.exists(args.out_dir):
-        os.makedirs(args.out_dir)
+    os.makedirs(args.out_dir, exist_ok=True)
+    try:
+        # recursive_chown(args.out_dir, "cosmic", "cosmic")
+        os.system(f"chown cosmic:cosmic -R {args.out_dir}")
+    except:
+        pass
 
     main(args)
 
