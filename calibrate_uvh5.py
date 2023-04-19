@@ -157,7 +157,7 @@ class calibrate_uvh5:
         print("Deriving Calibrations now")
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
-        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = 10)
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = 12)
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
         
@@ -179,7 +179,7 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
         json_gain_dict['obs_id'] = self.metadata['obs_id']
         write_out_dict = {}
-        write_out_dict[str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
+        write_out_dict[str(min(self.metadata['freq_array'])/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
         #Writting the dictionary as a json file
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
@@ -495,7 +495,7 @@ class calibrate_uvh5:
                 plt.close()   
 
 
-    def get_res_delays(self, data, outdir, ref_ant = 'ea10'):
+    def get_res_delays(self, data, outdir, ref_ant = 'ea12'):
 
         data = np.squeeze(data) # removing redundant axis
         fin_nchan =  1024 # Getting frequency shape
@@ -587,7 +587,7 @@ class calibrate_uvh5:
         dh.close()
         return outfile_res
 
-    def get_phases(self, ref_ant = 'ea10'):
+    def get_phases(self, ref_ant = 'ea12'):
 
         nbl, ntime, nchan, npol = self.vis_data.shape
         nant = self.metadata['nant_data']
