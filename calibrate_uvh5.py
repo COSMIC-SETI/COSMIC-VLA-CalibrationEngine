@@ -84,9 +84,9 @@ class calibrate_uvh5:
         return metadata
 
     def print_metadata(self):
-        #Print out the observation details
+        #Return string of full observation details
 
-        print(f" Observations from {self.metadata['telescope']}: \n\
+        s = (f" Observations from {self.metadata['telescope']}: \n\
                 Source observed: {self.metadata['source']} \n\
                 No. of time integrations: {self.metadata['ntimes']} \n\
                 Length of time integration: {self.metadata['intg_time']} s \n\
@@ -104,7 +104,9 @@ class calibrate_uvh5:
                 Current antenna list in the data: {self.metadata['ant_curr']} \n\
                 No. of antennas in the array: {self.metadata['nant_array']} \n\
                 Antenna name: {self.metadata['ant_names']} \n\
-                Tuning: {self.metadata['tuning']}")
+                Tuning: {self.metadata['tuning']}\n\
+                Observation ID : {self.metadata['obs_id']}")
+        return s
 
 
     def get_uvw_data(self):
@@ -815,9 +817,18 @@ def main(args):
     # Creating an object with the input data file from solutions needed to be derived
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
+    out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration_gains")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+        
     #Print the metdata of the input file
-    # cal_ob.print_metadata()
+    if args.detail:
+        detail = cal_ob.print_metadata()
+        print(detail)
+        with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
+            f.write(detail)
 
+        
     #Uncomment the following lines depending on the tasks to be completed
 
     #++++++++++++++++++++++++++++++++++++++++++++++++
@@ -828,21 +839,19 @@ def main(args):
     #Make a bunch of diagnostic plots before applying calibrations
     
     #plot the ampilitude and phase of visibility data
-    #cal_ob.plot_phases_vs_freq(cal_ob.vis_data, args.out_dir, plot_amp = True)
+    if args.phasevsfreq:
+        cal_ob.plot_phases_vs_freq(cal_ob.vis_data, args.out_dir, plot_amp = True)
     
     #plot the Phase waterfall plots of the visibility
-    # cal_ob.plot_phases_waterfall(cal_ob.vis_data, args.out_dir, track_phase = True)
+    if args.phasewaterfall:
+        cal_ob.plot_phases_waterfall(cal_ob.vis_data, args.out_dir, track_phase = True)
 
     #plot the Delay waterfall plots of the visibility
-    #cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
+    if args.delaywaterfall:
+        cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
-
-    out_dir = os.path.join(args.out_dir, "calibration_gains")
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
-
     if args.gendelay:
         outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir)
         shutil.chown(outfile_delays, "cosmic", "cosmic")
@@ -904,6 +913,14 @@ if __name__ == '__main__':
     parser.add_argument('--gendelay', action='store_true',
             help = 'If set, generate a file of output delays per antpol')
     parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
+    parser.add_argument('--detail', action='store_true', help="""
+    If specified, will print out and save the UVH5 header to file""")
+    parser.add_argument('--phasevsfreq', action='store_true', help="""
+    If specified, generate and save plots of phase vs frequency""")
+    parser.add_argument('--phasewaterfall', action='store_true', help="""
+    If specified, generate and save phase waterfall plots""")
+    parser.add_argument('--delaywaterfall', action='store_true', help="""
+    If specified, generate and save delay waterfall plots""")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
