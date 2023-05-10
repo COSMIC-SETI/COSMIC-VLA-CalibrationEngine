@@ -1,6 +1,6 @@
 """
 Written by Savin Shynu Varghese
-Scripts to derive delay and phase calibrations from UVH5 files using Pyuvdata
+Scripts to flag rfi, derive delay and phase calibrations from UVH5 files using Pyuvdata
 Also, produces variety of diagnostic plots
 """
 import sys

@@ -1,3 +1,9 @@
+"""
+Functions to flag the narrowband RFI from real and complex data 
+Utilizes a sliding median window for modelling the bandass which is subtracted
+from data to find deviant RFI data
+"""
+
 import numpy as np
 from scipy.stats import median_abs_deviation as mad
 

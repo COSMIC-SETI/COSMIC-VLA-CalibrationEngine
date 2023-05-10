@@ -1,6 +1,7 @@
 """
 Calibration codes written by Paul Demorest
 Edited by Savin Shynu Varghese for calibrating the COSMIC data
+Also, contains a RFI flagging routine for COSMIC
 """
 
 import numpy as np
