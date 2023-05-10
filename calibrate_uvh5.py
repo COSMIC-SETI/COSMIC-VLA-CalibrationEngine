@@ -17,7 +17,7 @@ from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
 from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis
-from sliding_rfi_flagger import flag_rfi
+from sliding_rfi_flagger import flag_rfi_real
 
 
 
@@ -31,7 +31,7 @@ def flag_spectrum(spectrum, win, threshold = 3):
     """
 
     #Getting bad channels
-    bad_chan = flag_rfi(spectrum, win, threshold)
+    bad_chan = flag_rfi_real(spectrum, win, threshold)
     
     ##Zeroing bad channels
     spectrum[bad_chan[:,0]] = 0
