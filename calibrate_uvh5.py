@@ -16,7 +16,7 @@ from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
-from calib_util import gaincal_cpu, gaincal_gpu, applycal
+from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis
 from sliding_rfi_flagger import flag_rfi
 
 
@@ -49,7 +49,7 @@ class calibrate_uvh5:
         self.uvd = UVData()
         self.uvd.read(datafile, fix_old_proj=False)
         self.metadata = self.get_metadata()
-        self.vis_data = self.get_vis_data_new()
+        self.vis_data = self.get_vis_data()
         self.ant_indices = self.get_ant_array_indices()
         self.redis_obj = redis_obj
 
@@ -115,30 +115,17 @@ class calibrate_uvh5:
         uvw_array = uvw_array.reshape(self.metadata['ntimes'], self.metadata['bls'], 3)
         return uvw_array
 
-    """
+
     def get_vis_data(self):
-        
-        # This seems to be a straight forward method
-        # But the values out of uvd_data_array does not make any sense
-
-
-        vis = np.zeros((self.metadata['nbls'], self.metadata['ntimes'], self.metadata['nfreqs'], self.metadata['npols']), dtype = 'complex128')
-        print(self.uvd.data_array.dtype)
-        vis = self.uvd.data_array.copy()
-        new_shape = (self.metadata['nbls'], self.metadata['ntimes'])+vis.shape[1:]
-        return np.squeeze(vis.reshape(new_shape))
-    """
-
-    def get_vis_data_new(self):
         
         """
         Iterate baseline by baseline and collect the
         visibility data
         """
         ant1, ant2 = self.uvd.baseline_to_antnums(self.uvd.baseline_array[:self.metadata['nbls']])
-        vis_new = np.zeros((self.metadata['nbls'], self.metadata['ntimes'], self.metadata['nfreqs'], self.metadata['npols']), dtype = 'complex128')
+        vis = np.zeros((self.metadata['nbls'], self.metadata['ntimes'], self.metadata['nfreqs'], self.metadata['npols']), dtype = 'complex128')
         for i in range(self.metadata['nbls']):
-            vis_new[i,...] = self.uvd.get_data(ant1[i], ant2[i])
+            vis[i,...] = self.uvd.get_data(ant1[i], ant2[i])
 
         return np.squeeze(vis_new)
        
@@ -149,8 +136,21 @@ class calibrate_uvh5:
         outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0] +'.ms')
         return self.uvd.write_ms(outfile)
 
+    def flag_rfi_vis(self, threshold = 7):
+        """
+        Flag RFI channels in the visibility data
 
-    def derive_phase(self, outdir):
+        """
+        print("Starting RFI flagging now")
+        t1 = time.time()
+        flag_complex_vis(self.vis_data, threshold)
+        #flag_complex_vis_proto(self.vis_data, threshold)
+        
+        t2 = time.time()
+        print(f"Flagging finished in {t2-t1}s")
+
+
+    def derive_gains(self, outdir):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
@@ -196,7 +196,7 @@ class calibrate_uvh5:
         
         return outfile_json
 
-    def apply_phase(self, gainsol):
+    def apply_gains(self, gainsol):
         """
         Apply the derived gains to a UVH5 dataset. 
         Also the antenna list in gain has to match with the new dataset, otherwise applying the gains to the
@@ -849,7 +849,14 @@ def main(args):
     #plot the Delay waterfall plots of the visibility
     if args.delaywaterfall:
         cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
+    
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    
+    #Flag the narrowband RFI in the data, use this before calculating delays and gains
+    if args.flagrfi:
+        cal_ob.flag_rfi_vis(threshold = 5)
+
+    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
     if args.gendelay:
@@ -863,7 +870,7 @@ def main(args):
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
 
-        outfile_gains = cal_ob.derive_phase(out_dir)
+        outfile_gains = cal_ob.derive_gains(out_dir)
         shutil.chown(outfile_gains, "cosmic", "cosmic")
 
     if args.genphase:
@@ -906,6 +913,8 @@ if __name__ == '__main__':
     parser.add_argument('-d','--dat_file', type = str, required = True, help = 'UVH5 file to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
     parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
+    parser.add_argument('--flagrfi', action='store_true',
+            help = 'If set, flag the narrowband RFI in the dataset')
     parser.add_argument('--gengain', action='store_true',
             help = 'If set, generate a json file of output gain per antenna/freq/pol')
     parser.add_argument('--genphase', action='store_true',
