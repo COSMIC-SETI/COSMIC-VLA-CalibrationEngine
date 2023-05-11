@@ -127,7 +127,7 @@ class calibrate_uvh5:
         for i in range(self.metadata['nbls']):
             vis[i,...] = self.uvd.get_data(ant1[i], ant2[i])
 
-        return np.squeeze(vis_new)
+        return np.squeeze(vis)
        
     def write_ms(self, outdir):
         """
