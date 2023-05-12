@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import redis
 import shutil
-from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
+from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
@@ -83,6 +83,19 @@ class calibrate_uvh5:
         'obs_id' : extra_keywords['ObservationID']}
         return metadata
 
+    def get_refant(self):
+        try:
+            antdisp = redis_hget_keyvalues(self.redis_obj, "META_antennaDisplacement")
+            sorted_antdispmap = dict(sorted(antdisp.items(), key=lambda item: item[1]))
+        except:
+            return None
+        for ant, _ in sorted_antdispmap.items():
+            if ant in self.metadata['ant_names']:
+                return ant
+            else:
+                continue
+        return None
+
     def print_metadata(self):
         #Return string of full observation details
 
@@ -150,7 +163,7 @@ class calibrate_uvh5:
         print(f"Flagging finished in {t2-t1}s")
 
 
-    def derive_gains(self, outdir):
+    def derive_gains(self, outdir,  ref_ant = 'ea12'):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
@@ -159,7 +172,8 @@ class calibrate_uvh5:
         print("Deriving Calibrations now")
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
-        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = 12)
+        antind = self.metadata['ant_names'].index(ref_ant)
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = self.metadata['ant_curr'][antind])
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
         
@@ -180,6 +194,7 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str]['gain_pol1_real'] = gain[i, :, 3].real.tolist()
             json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
         json_gain_dict['obs_id'] = self.metadata['obs_id']
+        json_gain_dict['ref_ant'] = ref_ant
         write_out_dict = {}
         write_out_dict[str(min(self.metadata['freq_array'])/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
         #Writting the dictionary as a json file
@@ -827,10 +842,8 @@ def main(args):
         print(detail)
         with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
             f.write(detail)
-
-        
-    #Uncomment the following lines depending on the tasks to be completed
-
+    refant = cal_ob.get_refant()
+    refant = refant if  refant is not None else "ea23"
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
@@ -848,7 +861,7 @@ def main(args):
 
     #plot the Delay waterfall plots of the visibility
     if args.delaywaterfall:
-        cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
+        cal_ob.plot_delays_waterfall(cal_ob.vis_data, args.out_dir, track_delay = True)
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
@@ -860,7 +873,7 @@ def main(args):
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
     if args.gendelay:
-        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir)
+        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir, ref_ant = refant)
         shutil.chown(outfile_delays, "cosmic", "cosmic")
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -870,11 +883,11 @@ def main(args):
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
 
-        outfile_gains = cal_ob.derive_gains(out_dir)
+        outfile_gains = cal_ob.derive_gains(out_dir, ref_ant = refant)
         shutil.chown(outfile_gains, "cosmic", "cosmic")
 
     if args.genphase:
-        antnames, phases = cal_ob.get_phases() # An antenna x time x channel x ?cross-pol?
+        antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
         out = {
             'ant_names': antnames,
             'freqs_hz': cal_ob.metadata['freq_array'].tolist(),
