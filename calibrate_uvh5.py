@@ -172,8 +172,8 @@ class calibrate_uvh5:
         print("Deriving Calibrations now")
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
-        antind = self.metadata['ant_names'].index(ref_ant)
-        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = self.metadata['ant_curr'][antind])
+        antind = int(ref_ant[2:])
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
         
