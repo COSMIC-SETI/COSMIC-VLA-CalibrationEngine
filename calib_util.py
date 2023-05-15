@@ -1,19 +1,61 @@
 """
 Calibration codes written by Paul Demorest
 Edited by Savin Shynu Varghese for calibrating the COSMIC data
+Also, contains a RFI flagging routine for COSMIC
 """
 
 import numpy as np
 from numpy import linalg as linalg_cpu
 import cupy as cp
 from cupy import linalg as linalg_gpu
+from sliding_rfi_flagger import flag_rfi_complex_pol
+
+
+def flag_complex_vis(vis, threshold):
+
+    """
+    Function to flag bad RFI channel using a 
+    sliding median window:
+    """
+    
+    #Getting number of baselines and frequencies
+    nbls = vis.shape[0]
+    nfreqs = vis.shape[2]
+
+    #choosing a window size, very important
+    # Large window size needed if the the RFI is broad
+    #choosing a minimum and maximum of 10 and 20 channels
+
+    win = int(nfreqs/4)
+    if win < 10:
+        win ==10
+    elif win > 20:
+        win == 20
+
+    print("Averaging the visibilities in time:")
+
+    #Average the data along time axis
+    vis_avg = np.mean(vis, axis = 1)
+    
+    print("Flagging RFI in each baseline")
+    #Iterate over each baseline to compute a bandpass model and flag the rfi/replace flagged values from the model
+    for i in range(nbls):
+        spec = vis_avg[i,:,:]
+        #Getting a dict of bad channels per spectrum and smooth bandpass model per polarization
+        bad_chans, smth_bp = flag_rfi_complex_pol(spec, win, threshold)
+        
+        for pol in bad_chans.keys():
+            bad = bad_chans[pol]
+            #Replacing the bad RFI channels with the values from smooth bandpass model
+            for tm in range(vis.shape[1]):
+                vis[i,tm,bad,pol] = smth_bp[bad, pol]
+
+
 
 
 
 # Some routines to derive simple calibration solutions directly
 # from data arrays.
-
-
 
 
 def gaincal_cpu(data, ant_curr, ant_indices, axis=1, ref_ant=10, avg=[], nit=3):
