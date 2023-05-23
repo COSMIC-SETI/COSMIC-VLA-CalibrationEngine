@@ -1,7 +1,7 @@
 """
 Calibration codes written by Paul Demorest
 Edited by Savin Shynu Varghese for calibrating the COSMIC data
-Also, contains a RFI flagging routine for COSMIC
+Also, contains a RFI flagging routines for COSMIC
 """
 
 import numpy as np
@@ -9,7 +9,7 @@ from numpy import linalg as linalg_cpu
 import cupy as cp
 from cupy import linalg as linalg_gpu
 from sliding_rfi_flagger import flag_rfi_complex_pol
-
+from scipy.stats import median_abs_deviation as mad
 
 def flag_complex_vis_medf(vis, threshold):
 
