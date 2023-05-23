@@ -16,7 +16,7 @@ from cosmic.redis_actions import redis_obj, redis_publish_dict_to_hash
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
-from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis
+from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
 from sliding_rfi_flagger import flag_rfi_real
 
 
@@ -143,8 +143,7 @@ class calibrate_uvh5:
         """
         print("Starting RFI flagging now")
         t1 = time.time()
-        flag_complex_vis(self.vis_data, threshold)
-        #flag_complex_vis_proto(self.vis_data, threshold)
+        flag_complex_vis_medf(self.vis_data, threshold)
         
         t2 = time.time()
         print(f"Flagging finished in {t2-t1}s")
@@ -835,6 +834,13 @@ def main(args):
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    #Flag the narrowband RFI in the data, use this before calculating delays and gains
+    if args.flagrfi:
+        cal_ob.flag_rfi_vis(threshold = 5)
+
+
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Make a bunch of diagnostic plots before applying calibrations
     
@@ -851,12 +857,6 @@ def main(args):
         cal_ob.plot_delays_waterflall(cal_ob.vis_data, args.out_dir, track_delay = True)
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    
-    #Flag the narrowband RFI in the data, use this before calculating delays and gains
-    if args.flagrfi:
-        cal_ob.flag_rfi_vis(threshold = 5)
-
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     #Calculate the delays and spit out the delay values per baseline in the out_dir
     if args.gendelay:

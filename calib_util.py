@@ -11,7 +11,36 @@ from cupy import linalg as linalg_gpu
 from sliding_rfi_flagger import flag_rfi_complex_pol
 
 
-def flag_complex_vis(vis, threshold):
+def flag_complex_vis_medf(vis, threshold):
+
+    """
+    Function to flag bad RFI channel using just median of the data
+    """
+    nbls = vis.shape[0]
+    nfreqs = vis.shape[2]
+    npols = vis.shape[3]
+
+    print("Averaging the visibilities in time:")
+
+    #Average the data along time axis
+    vis_avg = np.mean(vis, axis = 1)
+    print("Flagging RFI in each baseline")
+    #Iterate over each baseline to compute a bandpass model and flaf the rfi
+    for i in range(nbls):
+
+        spec = vis_avg[i,:,:]
+
+        for pol in range(npols):
+            med = np.median(spec[:,pol])
+            sig_md = mad(spec[:,pol])
+            bad = np.argwhere(abs(spec[:,pol]-med) > threshold*abs(sig_md))
+
+            #Replacing the bad RFI channels with the values from smooth bandpass model
+            for tm in range(vis.shape[1]):
+                vis[i,tm,bad,pol] = med
+
+
+def flag_complex_vis_smw(vis, threshold):
 
     """
     Function to flag bad RFI channel using a 
