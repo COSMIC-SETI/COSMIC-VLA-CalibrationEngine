@@ -618,7 +618,7 @@ if __name__ == '__main__':
     parser.add_argument('-bc','--band-center', type = float, required = False, default = 0.5,  help = 'Bandwidth center around to plot and process specified as a decimal percentage [0.0, 1.0]-`band`, default:0.5')
     parser.add_argument('-f','--lfft', type = int, required = True, default = 120,  help = 'Length of FFT, default:120')
     parser.add_argument('-i', '--tint', type = float, required = True, help = 'Time to integrate in (s), default: whole file duration')
-    parser.add_argument('-td', '--time-delay', action = 'store_true', help = 'If there are fringes, plot/save the time delay plot. An RFI filtering is conductted before the IFFT')
+    parser.add_argument('-td', '--time-delay', action = 'store_true', help = 'Calculate the fixed delay and write out all the delays into a csv file')
     parser.add_argument('-o', '--output-directory', type = str, default = None, help = 'Save plots to this directory instead of plotting')
     parser.add_argument('-t', '--track', action = 'store_true', help = 'Track a channel as a function of time, need to enter a RFI free channel after inspection')
     parser.add_argument('-ap', '--autocorr-show-phase', action = 'store_true', help = 'Don\'t omit the phase in the autocorrelation plot')
