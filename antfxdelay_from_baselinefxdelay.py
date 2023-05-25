@@ -9,30 +9,14 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
     Parse input tuning CSV files as well as the CSV file of fixed delays presumed to be loaded,
     apply the residual delays from AC and BD files to the loaded fixed delays.
     """
-    # if len(d_AC) != 0:
-    #     print("Processing tuning 0")
-    #     while True:
-    #         tuning_1_done = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status"])["tuning_1_status"]
-    #         if tuning_1_done == 0:
-    #             continue
-    #         else:
-    #             inpt_fx_delay = tuning_1_done
-    #             
-    #             break
-
-    # elif len(d_BD) != 0:
-    #     print("Processing tuning 1")
-
-    # else:
-    #     print("No updates on fixed for tuning 0 or 1 provided, will just write out fixed delays again.")
-
+    
     #Parse loaded delays csv file:        
     try:
         inpt_fx_delay = os.path.abspath(inpt_fx_delay)
         fixed_delays = pd.read_csv(inpt_fx_delay, names = ["IF0","IF1","IF2","IF3"],
                             header=None, skiprows=1).to_dict()
     except:
-        print(f"Error, unable to parse csv fixed delay file: {fixed_delays}")
+        print(f"Error, unable to parse csv fixed delay file: {inpt_fx_delay}")
         return 0
     
     #Reference antenna is taken to be the zero-field in the input fixed delays:
@@ -73,8 +57,8 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
                     fixed_delays["IF1"][ant_in_baseline[0]] -= tuning_AC_resid["total_pol1"][id]
                 elif  ant_in_baseline.index(refant) == 0:
                     #position 2 - apply two polarisations
-                    fixed_delays["IF0"][ant_in_baseline[0]] += tuning_AC_resid["total_pol0"][id]
-                    fixed_delays["IF1"][ant_in_baseline[0]] += tuning_AC_resid["total_pol1"][id]
+                    fixed_delays["IF0"][ant_in_baseline[1]] += tuning_AC_resid["total_pol0"][id]
+                    fixed_delays["IF1"][ant_in_baseline[1]] += tuning_AC_resid["total_pol1"][id]
                 else:
                     print(f"""Error, baseline field for file: 
                     {d_AC}
@@ -108,8 +92,8 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
                     fixed_delays["IF3"][ant_in_baseline[0]] -= tuning_BD_resid["total_pol1"][id]
                 elif  ant_in_baseline.index(refant) == 0:
                     #position 2 - apply two polarisations
-                    fixed_delays["IF2"][ant_in_baseline[0]] += tuning_BD_resid["total_pol0"][id]
-                    fixed_delays["IF3"][ant_in_baseline[0]] += tuning_BD_resid["total_pol1"][id]
+                    fixed_delays["IF2"][ant_in_baseline[1]] += tuning_BD_resid["total_pol0"][id]
+                    fixed_delays["IF3"][ant_in_baseline[1]] += tuning_BD_resid["total_pol1"][id]
                 else:
                     print(f"""Error, baseline field for file: 
                     {d_AC}
