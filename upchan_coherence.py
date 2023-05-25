@@ -21,8 +21,16 @@ from matplotlib import pyplot as plt
 import argparse
 from sliding_rfi_flagger import flag_rfi
 from compute_uvw import vla_uvw
+from antfxdelay_from_baselinefxdelay import antfxdelay_from_baselinefxdelay
+from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_dict_to_hash
+
+#NAUGHTY STEP TO GAIN ACCESS TO COSMIC-VLA-DelayEngine
+sys.path.append("/home/cosmic/src/COSMIC-VLA-DelayEngine")
+from configure_calibration_process import load_and_configure_calibrations
 
 from scipy.stats import median_abs_deviation as mad
+
+CONFIG_HASH = "CAL_configuration"
 
 # matplotlib.use('Tkagg')
 
@@ -36,6 +44,7 @@ def main(
     time_delay,
     output_directory,
     plot,
+    pipeline,
     crosscorr_channel_time_promptplot,
     autocorr_show_phase = False,
     autocorr_cross_polarizations = False,
@@ -273,7 +282,8 @@ def main(
                     crosscorr_ifft_power_pol1,
                     tlags,
                     axs[2,0], axs[2,1],
-                    baseline_str
+                    baseline_str,
+                    plot
                 )
 
                 geo_baseline = -(geo_delays[ant1] - geo_delays[ant2]) # sign flipping the delay
@@ -283,12 +293,13 @@ def main(
             
             fig.suptitle(f"File: {plot_id}")
 
-            if output_directory is None:
-                plt.show()
-            else:
-                filename = os.path.join(output_directory, f"cross_corr_{plot_id}_{baseline_str}.png")
-                plt.savefig(filename, dpi = 150)
-                plt.close()
+            if plot:
+                if output_directory is None:
+                    plt.show()
+                else:
+                    filename = os.path.join(output_directory, f"cross_corr_{plot_id}_{baseline_str}.png")
+                    plt.savefig(filename, dpi = 150)
+                    plt.close()
 
             if crosscorr_channel_time_promptplot and plot:
                 plot_crosscorrelation_time(
@@ -299,8 +310,59 @@ def main(
                     savefig_directory = output_directory
                 )
     dh.close()
+
     if plot:
         print(f"Plotted: {plot_id}")
+
+    if pipeline:
+        tune = 0 if "AC" in filename else 1 if "BD" in filename else -1
+        if tune == 0:
+            print("RAWFILE processed was for tuning 0")
+            t = time.time()
+            while True:
+                #check if tuning 1 is done (which is running in a separate node):
+                tuning_1_done = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status"])["tuning_1_status"]
+                if tuning_1_done == 0:
+                    #if not, give it 10s to complete
+                    if time.time() - t > 30:
+                        #if not complete in time, spawn for tuning 0
+                        print("Tuning 1 did not complete in 30s, aborting run")
+                        return
+                    else:
+                        print("Tuning 1 not complete, waiting...")
+                        time.sleep(0.5)
+                        continue
+                else:
+                    #if tuning 1 is done, break and process tuning 0
+                    print(f"Tuning 1 is complete, modifying: {tuning_1_done}")
+                    break
+            fixed_delays = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=tuning_1_done)
+            redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : 0})
+            config = redis_hget_keyvalues(redis_obj, CONFIG_HASH)
+            load_and_configure_calibrations(
+                hash_timeout = config["hash_timeout"],
+                re_arm_time = config["re_arm_time"],
+                fit_method = config["fit_method"],
+                input_fixed_delays = fixed_delays,
+                input_fixed_phases = config["input_fixed_phases"],
+                snr_threshold = config["snr_threshold"]
+            )
+
+        elif tune == 1:
+            print("RAWFILE processed was for tuning 1")
+            inpt_fx_delay = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["input_fixed_delays"])["input_fixed_delays"]
+            output_delay_path = antfxdelay_from_baselinefxdelay(d_BD = filename, inpt_fx_delay=inpt_fx_delay)
+            if output_delay_path == 0:
+                print("ERROR in extract delay per antenna for tuning 1")
+            else:
+                print(f"""
+                Successfully parsed tuning 1 and saved updated fixed delays to
+                {output_delay_path}
+                """)
+                redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : output_delay_path})
+
+        else:
+            print("ERROR: Rawfilename contains no instance of AC or BD - cannot determine tuning.")
 
 
 def plot_autocorrelations(
@@ -481,7 +543,8 @@ def _plot_time_delay(
     crosscorr_ifft_power_pol1,
     tlags,
     ax0, ax1,
-    baseline_str
+    baseline_str,
+    plot
 ):
     tmax_pol0 = np.argmax(crosscorr_ifft_power_pol0)
     sig_pol0 = crosscorr_ifft_power_pol0[tmax_pol0]
@@ -494,18 +557,18 @@ def _plot_time_delay(
     noise_pol1 = mad(crosscorr_ifft_power_pol1)
     median_pol1 = np.median(crosscorr_ifft_power_pol1)
     snr_pol1 = (sig_pol1-median_pol1)/noise_pol1
+    if plot:
+        ax0.plot(tlags, crosscorr_ifft_power_pol0, label = 'pol 0')
+        ax0.set_ylabel("Power (a.u) log scale")
+        ax0.set_xlabel(f"Time lags (delta t = {tlags[1] -tlags[0]}) ns)")
+        ax0.set_title(f"{baseline_str}: time delay = {tlags[tmax_pol0]} ns")
+        ax0.legend()
 
-    ax0.plot(tlags, crosscorr_ifft_power_pol0, label = 'pol 0')
-    ax0.set_ylabel("Power (a.u) log scale")
-    ax0.set_xlabel(f"Time lags (delta t = {tlags[1] -tlags[0]}) ns)")
-    ax0.set_title(f"{baseline_str}: time delay = {tlags[tmax_pol0]} ns")
-    ax0.legend()
-
-    ax1.plot(tlags, crosscorr_ifft_power_pol1, label = 'pol 1')
-    ax1.set_ylabel("Power (a.u) log scale")
-    ax1.set_xlabel(f"Time lags (delta t = {tlags[1] -tlags[0]} ns)")
-    ax1.set_title(f"{baseline_str}: time delay = {tlags[tmax_pol1]} ns")
-    ax1.legend()
+        ax1.plot(tlags, crosscorr_ifft_power_pol1, label = 'pol 1')
+        ax1.set_ylabel("Power (a.u) log scale")
+        ax1.set_xlabel(f"Time lags (delta t = {tlags[1] -tlags[0]} ns)")
+        ax1.set_title(f"{baseline_str}: time delay = {tlags[tmax_pol1]} ns")
+        ax1.legend()
     return (tlags[tmax_pol0], tlags[tmax_pol1]), (snr_pol0, snr_pol1)
 
 
@@ -626,6 +689,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output-directory', type = str, default = None, help = 'Save plots to this directory instead of plotting')
     parser.add_argument('-t', '--track', action = 'store_true', help = 'Track a channel as a function of time, need to enter a RFI free channel after inspection')
     parser.add_argument('-p','--plot', action = 'store_true', help = 'If specified, plots are generated and saved. Otherwise not.')
+    parser.add_argument('--pipeline', action = 'store_true', help = 'If specified, the code runs as it does in production, calling antfxdelay_from_baselinefxdelay() and thereafter load_and_configure_calibrations().')
     parser.add_argument('-ap', '--autocorr-show-phase', action = 'store_true', help = 'Don\'t omit the phase in the autocorrelation plot')
     parser.add_argument('-ac', '--autocorr-cross-pols', action = 'store_true', help = 'Cross the polarizations for the autocorrelations')
 
@@ -649,7 +713,8 @@ if __name__ == '__main__':
         args.tint,
         args.time_delay,
         args.output_directory,
-        args.plot
+        args.plot,
+        args.pipeline,
         args.track,
         autocorr_show_phase = args.autocorr_show_phase,
         autocorr_cross_polarizations = args.autocorr_cross_pols,
