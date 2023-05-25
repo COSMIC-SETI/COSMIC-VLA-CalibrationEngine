@@ -35,6 +35,7 @@ def main(
     tint,
     time_delay,
     output_directory,
+    plot,
     crosscorr_channel_time_promptplot,
     autocorr_show_phase = False,
     autocorr_cross_polarizations = False,
@@ -188,13 +189,14 @@ def main(
             ants[ant1]: np.mean(data[ant1,...]*np.conjugate(data[ant1,...]), axis = 0, keepdims=False)
             for ant1 in range(0, nant)
         }
-    plot_autocorrelations(
-        autocorr_mean_dict, # {ant_name: [Chan, Pol]}
-        freq_axis,
-        plot_id = plot_id,
-        savefig_directory = output_directory,
-        omit_phase = not autocorr_show_phase
-    )
+    if plot:
+        plot_autocorrelations(
+            autocorr_mean_dict, # {ant_name: [Chan, Pol]}
+            freq_axis,
+            plot_id = plot_id,
+            savefig_directory = output_directory,
+            omit_phase = not autocorr_show_phase
+        )
 
     if crosscorr_channel_time_promptplot:
         track_chan = int(input(f"Enter the channel (enumeration) to track [0={freq_axis[0]}, {nchan}={freq_axis[1]}]:"))
@@ -248,14 +250,15 @@ def main(
             #Plotting the phase and amplitude of the cross correlation
             fig, axs = plt.subplots(nrows, 2, constrained_layout=True, figsize = (10,4*nrows))
 
-            _plot_crosscorrelations(
-                autocorr_mean_dict[ants[ant1]], # [Chan, Pol]
-                autocorr_mean_dict[ants[ant2]], # [Chan, Pol]
-                crosscorr_mean, # [Chan, Pol]
-                baseline_str,
-                freq_axis,
-                axs
-            )
+            if plot:
+                _plot_crosscorrelations(
+                    autocorr_mean_dict[ants[ant1]], # [Chan, Pol]
+                    autocorr_mean_dict[ants[ant2]], # [Chan, Pol]
+                    crosscorr_mean, # [Chan, Pol]
+                    baseline_str,
+                    freq_axis,
+                    axs
+                )
             
             if time_delay:
                 crosscorr_ifft_power_pol0, crosscorr_ifft_power_pol1, tlags = proc_time_delay(
@@ -287,7 +290,7 @@ def main(
                 plt.savefig(filename, dpi = 150)
                 plt.close()
 
-            if crosscorr_channel_time_promptplot:
+            if crosscorr_channel_time_promptplot and plot:
                 plot_crosscorrelation_time(
                     crosscorr[:,track_chan,:], # [Time, Pol]
                     baseline_str,
@@ -296,7 +299,8 @@ def main(
                     savefig_directory = output_directory
                 )
     dh.close()
-    print(f"Plotted: {plot_id}")
+    if plot:
+        print(f"Plotted: {plot_id}")
 
 
 def plot_autocorrelations(
@@ -621,12 +625,20 @@ if __name__ == '__main__':
     parser.add_argument('-td', '--time-delay', action = 'store_true', help = 'Calculate the fixed delay and write out all the delays into a csv file')
     parser.add_argument('-o', '--output-directory', type = str, default = None, help = 'Save plots to this directory instead of plotting')
     parser.add_argument('-t', '--track', action = 'store_true', help = 'Track a channel as a function of time, need to enter a RFI free channel after inspection')
+    parser.add_argument('-p','--plot', action = 'store_true', help = 'If specified, plots are generated and saved. Otherwise not.')
     parser.add_argument('-ap', '--autocorr-show-phase', action = 'store_true', help = 'Don\'t omit the phase in the autocorrelation plot')
     parser.add_argument('-ac', '--autocorr-cross-pols', action = 'store_true', help = 'Cross the polarizations for the autocorrelations')
 
     parser.add_argument('-r', '--reference-antenna', type = str, default = None, help = 'Select a reference antenna, so that only baselines with that antenna are processed')
 
     args = parser.parse_args()
+
+    os.makedirs(args.output_directory, exist_ok=True)
+    try:
+        # recursive_chown(args.out_dir, "cosmic", "cosmic")
+        os.system(f"chown cosmic:cosmic -R {args.out_dir}")
+    except:
+        pass
 
     main(
         args.dat_file,
@@ -637,6 +649,7 @@ if __name__ == '__main__':
         args.tint,
         args.time_delay,
         args.output_directory,
+        args.plot
         args.track,
         autocorr_show_phase = args.autocorr_show_phase,
         autocorr_cross_polarizations = args.autocorr_cross_pols,
