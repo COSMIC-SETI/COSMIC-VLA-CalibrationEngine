@@ -337,6 +337,7 @@ def main(
                     print(f"Tuning 1 is complete, modifying: {tuning_1_done}")
                     break
             fixed_delays = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=tuning_1_done)
+            os.remove(tuning_1_done)
             redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : 0})
             config = redis_hget_keyvalues(redis_obj, CONFIG_HASH)
             load_and_configure_calibrations(
