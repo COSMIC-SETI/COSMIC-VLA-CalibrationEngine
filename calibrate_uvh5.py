@@ -90,7 +90,8 @@ class calibrate_uvh5:
         except:
             return None
         for ant, _ in sorted_antdispmap.items():
-            if ant in self.metadata['ant_names']:
+            antind = int(ant[2:])
+            if antind in self.metadata['ant_curr']:
                 return ant
             else:
                 continue
