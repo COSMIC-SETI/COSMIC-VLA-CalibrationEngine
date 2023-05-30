@@ -321,8 +321,8 @@ def main(
             t = time.time()
             while True:
                 #check if tuning 1 is done (which is running in a separate node):
-                tuning_1_done = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status"])["tuning_1_status"]
-                if tuning_1_done == 0:
+                config = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status","refant"])
+                if config["tuning_1_status"] == 0:
                     #if not, give it 10s to complete
                     if time.time() - t > 30:
                         #if not complete in time, spawn for tuning 0
@@ -334,10 +334,10 @@ def main(
                         continue
                 else:
                     #if tuning 1 is done, break and process tuning 0
-                    print(f"Tuning 1 is complete, modifying: {tuning_1_done}")
+                    print(f"Tuning 1 is complete, modifying: {config['tuning_1_status']}")
                     break
-            fixed_delays = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=tuning_1_done)
-            os.remove(tuning_1_done)
+            fixed_delays, refant = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=config["tuning_1_status"], refant=config["refant"])
+            os.remove(config["tuning_1_status"])
             redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : 0})
             config = redis_hget_keyvalues(redis_obj, CONFIG_HASH)
             load_and_configure_calibrations(
@@ -351,8 +351,19 @@ def main(
 
         elif tune == 1:
             print("RAWFILE processed was for tuning 1")
-            inpt_fx_delay = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["input_fixed_delays"])["input_fixed_delays"]
-            output_delay_path = antfxdelay_from_baselinefxdelay(d_BD = filename, inpt_fx_delay=inpt_fx_delay)
+            try:
+                inpt_fx_delay = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["input_fixed_delays"])["input_fixed_delays"]
+                antdisp = redis_hget_keyvalues(redis_obj, "META_antennaDisplacement")
+            except:
+                print("ERROR, unable to fetch required redis hashes")
+                return
+            try:
+                sorted_antdispmap = dict(sorted(antdisp.items(), key=lambda item: item[1]))
+            except:
+                print("ERROR, unable to sort antenna displacement hash")
+                return
+
+            output_delay_path, refant = antfxdelay_from_baselinefxdelay(d_BD = filename, inpt_fx_delay=inpt_fx_delay, observed_ants = ants, ant_displacements = sorted_antdispmap)
             if output_delay_path == 0:
                 print("ERROR in extract delay per antenna for tuning 1")
             else:
@@ -360,7 +371,8 @@ def main(
                 Successfully parsed tuning 1 and saved updated fixed delays to
                 {output_delay_path}
                 """)
-                redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : output_delay_path})
+                #Publish the path to the BD tuning modified csv file and determined refant
+                redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : output_delay_path, "refant" : refant})
 
         else:
             print("ERROR: Rawfilename contains no instance of AC or BD - cannot determine tuning.")
