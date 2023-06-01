@@ -80,8 +80,11 @@ def calibration_logger(influxdb_token):
         if message['channel'] == phase_update_channel:
             if json_message:
                 time_now = time.time_ns()
-                loaded_phase_file = redis_hget_keyvalues(redis_obj, "CAL_fixedValuePaths", "fixed_phase")   
-                value = Point("fix_paths").field("fixed_phase_path",loaded_phase_file["fixed_phase"]).time(time_now)
+                #arbitraly check grade in this case
+                calibration_phase_grade = redis_hget_keyvalues(redis_obj, "CAL_fixedValuePaths", ["fixed_phase","grade"])
+                value = Point("fix_paths").field("fixed_phase_path",calibration_phase_grade["fixed_phase"]).time(time_now)
+                write_api.write(bucket, org, value)
+                value = Point("fix_paths").field("calibration_grade",calibration_phase_grade["grade"]).time(time_now)
                 write_api.write(bucket, org, value)
                 ant_feng_map = ant_remotefeng_map.get_antennaFengineDict(redis_obj)
                 ant_phase_cal_map = redis_hget_keyvalues(redis_obj, "META_calibrationPhases")   
