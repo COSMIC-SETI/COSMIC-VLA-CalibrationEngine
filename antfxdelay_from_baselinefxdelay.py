@@ -4,7 +4,7 @@ import pandas as pd
 import datetime
 import re
 
-def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_delay : str = "", observed_ants : list = [], ant_displacements : dict = {}, refant=""):
+def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_delay : str = "", refant=""):
     """
     Parse input tuning CSV files as well as the CSV file of fixed delays presumed to be loaded,
     apply the residual delays from AC and BD files to the loaded fixed delays.
@@ -19,12 +19,9 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
         print(f"Error, unable to parse csv fixed delay file: {inpt_fx_delay}")
         return 0,0
     
-    #Reference antenna offset delays:
-    new_ref_delay = [0.0,0.0,0.0,0.0]
-    
-    #Reference antenna is taken to be the zero-field in the input fixed delays:
+    #Current reference antenna is taken to be the zero-field in the input fixed delays:
     if len(refant) == 0:
-        #A reference antenna has not been provided, determine previously used one.
+        #A reference antenna has not been provided, determine previously used one and use that.
         refant = []
         for stream in list(fixed_delays.keys()):
             for ant, val in fixed_delays[stream].items():
@@ -38,31 +35,8 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
             Error, loaded fixed delay file appears to contain multiple antenna entries with zero delays. 
             Cannot determine reference antenna.""")
             return 0,0
-    
-    if len(observed_ants) != 0:
-        #check that the refant calculated above exists in the observed antenna:
-            if refant not in observed_ants:
-                #This means that our prior used reference antenna is not present in the RAW recording.
-                print(f"""
-                Previously used reference antenna: {refant} is not in the current set of observed
-                baselines. As a result, a new reference antenna must be chosen based off of those observed
-                and their displacement from the centre of the array.
-                """)
-                if len(ant_displacements) != 0:
-                    for ant, _ in ant_displacements.items():
-                        if ant in observed_ants:
-                            refant = ant
-                            break
-                        else:
-                            continue
-                    print(f"""
-                    Determined new reference antenna {refant} from displacement map and what baselines were observed.
-                    """)
-                    for stream in list(fixed_delays.keys()):
-                        for ant,val in fixed_delays[stream].items():
-                            fixed_delays[stream][ant] -= fixed_delays[stream][refant]
-                else:
-                    return 0,0
+    else:
+        refant = refant
 
     #Parse tuning 0 delays csv file:
     if len(d_AC) != 0:
@@ -137,7 +111,7 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
     fixed_delays = pd.DataFrame.from_dict(fixed_delays)
     fixed_delays.to_csv(pathtosave)
     if os.path.isfile(pathtosave):
-        return pathtosave, refant
+        return pathtosave
     else:
         print(f"Saved file {pathtosave} does not exist.")
         return 0,0

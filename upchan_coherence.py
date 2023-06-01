@@ -48,10 +48,12 @@ def main(
     crosscorr_channel_time_promptplot,
     autocorr_show_phase = False,
     autocorr_cross_polarizations = False,
-    only_baselines_with = None
+    reference_antenna = None
 ):
     if output_directory is None:
         output_directory = os.path.dirname(dat_file)
+    
+    print(f"SAVING products to {output_directory}")
 
     # Collecting the data from the guppi raw files and
     # saving them to an array
@@ -217,6 +219,7 @@ def main(
 
     #Opening a file to save the delays, geodelays and non-geometric delays for each baselines
     filename = os.path.join(output_directory, f"delays_{plot_id}.csv")
+    print(f"GENERATED baseline:delay csv to {filename}")
     dh = open(filename, "w")
     dh.write(
         ",".join(
@@ -243,13 +246,14 @@ def main(
     )
 
     #Seperating out the data from two antennas into a different array and changing their order
+    print(f"ERROR, reference antenna {reference_antenna} not in observed antenna: {ants}")
     
     nrows = 2
     if time_delay:
         nrows += 1
     for ant1 in range(0, nant):
         for ant2 in range(ant1+1, nant):
-            if only_baselines_with is not None and only_baselines_with not in [ants[ant1], ants[ant2]]:
+            if reference_antenna is not None and reference_antenna not in [ants[ant1], ants[ant2]]:
                 continue
 
             baseline_str = f"{ants[ant1]}-{ants[ant2]}"
@@ -321,7 +325,7 @@ def main(
             t = time.time()
             while True:
                 #check if tuning 1 is done (which is running in a separate node):
-                config = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status","refant"])
+                config = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status"])
                 if config["tuning_1_status"] == 0:
                     #if not, give it 10s to complete
                     if time.time() - t > 60:
@@ -336,26 +340,20 @@ def main(
                     #if tuning 1 is done, break and process tuning 0
                     print(f"Tuning 1 is complete, modifying: {config['tuning_1_status']}")
                     break
-            fixed_delays, refant = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=config["tuning_1_status"], refant=config["refant"])
+            fixed_delays = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=config["tuning_1_status"], refant=reference_antenna)
             os.remove(config["tuning_1_status"])
             redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : 0})
-            print(f"GENERATED new fixed delays:\n{fixed_delays}")
+            print(f"GENERATED new fixed delays:{fixed_delays}")
 
         elif tune == 1:
             print("RAWFILE processed was for tuning 1")
             try:
                 inpt_fx_delay = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["input_fixed_delays"])["input_fixed_delays"]
-                antdisp = redis_hget_keyvalues(redis_obj, "META_antennaDisplacement")
             except:
                 print("ERROR, unable to fetch required redis hashes")
                 return
-            try:
-                sorted_antdispmap = dict(sorted(antdisp.items(), key=lambda item: item[1]))
-            except:
-                print("ERROR, unable to sort antenna displacement hash")
-                return
 
-            output_delay_path, refant = antfxdelay_from_baselinefxdelay(d_BD = filename, inpt_fx_delay=inpt_fx_delay, observed_ants = ants, ant_displacements = sorted_antdispmap)
+            output_delay_path = antfxdelay_from_baselinefxdelay(d_BD = filename, inpt_fx_delay=inpt_fx_delay, refant=reference_antenna)
             if output_delay_path == 0:
                 print("ERROR in extract delay per antenna for tuning 1")
             else:
@@ -364,7 +362,7 @@ def main(
                 {output_delay_path}
                 """)
                 #Publish the path to the BD tuning modified csv file and determined refant
-                redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : output_delay_path, "refant" : refant})
+                redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : output_delay_path})
 
         else:
             print("ERROR: Rawfilename contains no instance of AC or BD - cannot determine tuning.")
@@ -723,6 +721,6 @@ if __name__ == '__main__':
         args.track,
         autocorr_show_phase = args.autocorr_show_phase,
         autocorr_cross_polarizations = args.autocorr_cross_pols,
-        only_baselines_with = args.reference_antenna
+        reference_antenna = args.reference_antenna
     )
 
