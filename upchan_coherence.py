@@ -324,7 +324,7 @@ def main(
                 config = redis_hget_keyvalues(redis_obj, CONFIG_HASH, keys=["tuning_1_status","refant"])
                 if config["tuning_1_status"] == 0:
                     #if not, give it 10s to complete
-                    if time.time() - t > 30:
+                    if time.time() - t > 60:
                         #if not complete in time, spawn for tuning 0
                         print("Tuning 1 did not complete in 30s, aborting run")
                         return
@@ -339,15 +339,7 @@ def main(
             fixed_delays, refant = antfxdelay_from_baselinefxdelay(d_AC = filename, inpt_fx_delay=config["tuning_1_status"], refant=config["refant"])
             os.remove(config["tuning_1_status"])
             redis_publish_dict_to_hash(redis_obj, CONFIG_HASH, {"tuning_1_status" : 0})
-            config = redis_hget_keyvalues(redis_obj, CONFIG_HASH)
-            load_and_configure_calibrations(
-                hash_timeout = config["hash_timeout"],
-                re_arm_time = config["re_arm_time"],
-                fit_method = config["fit_method"],
-                input_fixed_delays = fixed_delays,
-                input_fixed_phases = config["input_fixed_phases"],
-                snr_threshold = config["snr_threshold"]
-            )
+            print(f"GENERATED new fixed delays:\n{fixed_delays}")
 
         elif tune == 1:
             print("RAWFILE processed was for tuning 1")

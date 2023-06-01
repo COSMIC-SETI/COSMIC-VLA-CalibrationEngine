@@ -136,8 +136,13 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
     print(f"Saving new fixed delays to: {pathtosave}")
     fixed_delays = pd.DataFrame.from_dict(fixed_delays)
     fixed_delays.to_csv(pathtosave)
+    if os.path.isfile(pathtosave):
+        return pathtosave, refant
+    else:
+        print(f"Saved file {pathtosave} does not exist.")
+        return 0,0
 
-    return pathtosave, refant
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
