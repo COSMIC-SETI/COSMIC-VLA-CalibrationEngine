@@ -123,11 +123,11 @@ def main(
     print(f"MJD start time: {mjd_start}, MJD time now: {mjd_now}")
 
     # Collecting data from each block into a big array
-    data = np.zeros((nant, nchan, int(ntsamp_block*n_blocks_read), npols), dtype = 'complex64')
+    data0 = np.zeros((nant, nchan, int(ntsamp_block*n_blocks_read), npols), dtype = 'complex64')
     print("Started collecting data")
     for i in tq.tqdm(range(n_blocks_read)):
         head_block, data_block = gob.read_next_data_block()
-        data[:,:, i*ntsamp_block:(i+1)*ntsamp_block, :] = data_block.reshape(nant, nchan, ntsamp_block, npols)
+        data0[:,:, i*ntsamp_block:(i+1)*ntsamp_block, :] = data_block.reshape(nant, nchan, ntsamp_block, npols)
 
     # Upchannelize the data
     print("Starting upchannelization part")
@@ -136,9 +136,9 @@ def main(
     nchan_fine = nchan*nfine
     
     # trim time to be a multiple of FFT size
-    ntime_total = data.shape[2]
+    ntime_total = data0.shape[2]
     ntime_total -= ntime_total % lfft
-    data = data[:, :, 0:ntime_total, :]
+    data0 = data0[:, :, 0:ntime_total, :]
 
     freq_range = freq_end - freq_start
     freq_end = freq_start + freq_range*band_top
@@ -146,20 +146,23 @@ def main(
 
     # Time, frequency resolution and number of time samples after FFT
     chan_timewidth = chan_timewidth*nfine
-    ntsampfine = int(data.shape[2]/nfine)
+    ntsampfine = int(data0.shape[2]/nfine)
     chan_freqwidth = chan_freqwidth/nfine
 
 
     # Reshaping the data for FFT
-    print(f"Reshaping the data for FFT from {data.shape}")
+    print(f"Reshaping the data for FFT from {data0.shape}")
     # reshape to [A,C,Tfine,Tfft,P]
-    data = data.reshape(nant, nchan, ntsampfine, nfine, npols)
+    data0 = data0.reshape(nant, nchan, ntsampfine, nfine, npols)
+    print(f"Reshaped to {data0.shape}")
     
     ## trim channel to minimum:
     # transpose to [A,Tfine,C,Tfft,P]
-    data = np.transpose(data, axes=(0,2,1,3,4))
+    data0 = np.transpose(data0, axes=(0,2,1,3,4))
+    print(f"Transposed to {data0.shape}")
     # reshape to [A,Tfine,C*Tfft,P]
-    data = data.reshape(nant, ntsampfine, nchan_fine, npols)
+    data = data0.reshape(nant, ntsampfine, nchan_fine, npols)
+    print(f"Second reshape to {data.shape}")
     # select band
     band_lower = int(nchan_fine*band_bottom)
     band_upper = int(nchan_fine*band_top + 0.5)
