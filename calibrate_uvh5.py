@@ -19,7 +19,7 @@ from pyuvdata import UVData
 from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
 from sliding_rfi_flagger import flag_rfi_real
 
-
+BAD_REFANT = ["ea05","ea06", "ea10", "ea12"]
 
 def flag_spectrum(spectrum, win, threshold = 3):
 
@@ -91,7 +91,7 @@ class calibrate_uvh5:
             return None
         for ant, _ in sorted_antdispmap.items():
             antind = int(ant[2:])
-            if antind in self.metadata['ant_curr']:
+            if antind in self.metadata['ant_curr'] and ant not in BAD_REFANT:
                 return ant
             else:
                 continue
