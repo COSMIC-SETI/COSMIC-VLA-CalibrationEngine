@@ -64,8 +64,9 @@ class calibrate_uvh5:
         time_array = np.arange(self.uvd.Ntimes)*self.uvd.integration_time[0]
         metadata  = {'nant_data' : self.uvd.Nants_data,
         'nant_array' : self.uvd.Nants_telescope,
-        'ant_names' : self.uvd.antenna_names, 
-        'ant_curr' : self.uvd.get_ants(),
+        'ant_names' : list(self.uvd.antenna_names),
+        'ant_numbers' : list(self.uvd.antenna_numbers),
+        'ant_numbers_data' : self.uvd.get_ants(),
         'nfreqs' : self.uvd.Nfreqs,
         'ntimes' : self.uvd.Ntimes,
         'npols': self.uvd.Npols,
@@ -84,18 +85,40 @@ class calibrate_uvh5:
         return metadata
 
     def get_refant(self):
+        observed_antenna_names = [
+            self.metadata['ant_names'][self.metadata['ant_numbers'].index(antnum)]
+            for antnum in self.metadata['ant_numbers_data']
+        ]
         try:
             antdisp = redis_hget_keyvalues(self.redis_obj, "META_antennaDisplacement")
-            sorted_antdispmap = dict(sorted(antdisp.items(), key=lambda item: item[1]))
+            sorted_antenna_name_list = list(
+                dict(
+                    sorted(antdisp.items(), key=lambda item: item[1])
+                ).keys()
+            )
         except:
-            return None
-        for ant, _ in sorted_antdispmap.items():
-            antind = int(ant[2:])
-            if antind in self.metadata['ant_curr'] and ant not in BAD_REFANT:
-                return ant
-            else:
+            sorted_antenna_name_list = observed_antenna_names
+
+        for antname in sorted_antenna_name_list:
+            if antname not in self.metadata['ant_names']:
                 continue
-        return None
+            
+            if antname in BAD_REFANT:
+                continue
+            
+            antind = self.metadata['ant_names'].index(antname)
+            antnum = self.metadata['ant_numbers'].index(antind)
+            if antnum in self.metadata['ant_numbers_data']
+                return antname
+
+        raise RuntimeError(
+            f"Cannot select a reference antenna:\n\t"
+            f"len(META_antennaDisplacement): {len(andisp)}\n\t"
+            f"BAD_REFANT: {BAD_REFANT}\n\t"
+            f"sorted antenna names: {sorted_antenna_name_list}\n\t"
+            f"observed antenna names: {observed_antenna_names}\n\t"
+        )
+
 
     def print_metadata(self):
         #Return string of full observation details
@@ -115,7 +138,7 @@ class calibrate_uvh5:
                 Data array shape: {self.vis_data.shape} \n\
                 No. of baselines: {self.metadata['nbls']}  \n\
                 No. of antennas present in data: {self.metadata['nant_data']} \n\
-                Current antenna list in the data: {self.metadata['ant_curr']} \n\
+                Current antenna list in the data: {self.metadata['ant_numbers_data']} \n\
                 No. of antennas in the array: {self.metadata['nant_array']} \n\
                 Antenna name: {self.metadata['ant_names']} \n\
                 Tuning: {self.metadata['tuning']}\n\
@@ -173,7 +196,7 @@ class calibrate_uvh5:
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
         antind = int(ref_ant[2:])
-        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
         
@@ -218,7 +241,7 @@ class calibrate_uvh5:
         correlated matrix would be difficult
         """
         data_cp = self.vis_data.copy()
-        applycal(data_cp, gainsol, self.metadata['ant_curr'], self.ant_indices, axis=0, phaseonly=False)
+        applycal(data_cp, gainsol, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
         print(self.vis_data.dtype)
         return data_cp
     
@@ -843,7 +866,6 @@ def main(args):
         with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
             f.write(detail)
     refant = cal_ob.get_refant()
-    refant = refant if  refant is not None else "ea23"
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
