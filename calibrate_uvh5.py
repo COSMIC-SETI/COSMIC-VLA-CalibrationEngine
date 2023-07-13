@@ -19,7 +19,7 @@ from pyuvdata import UVData
 from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
 from sliding_rfi_flagger import flag_rfi_real
 
-BAD_REFANT = ["ea05","ea06", "ea10", "ea12"]
+BAD_REFANT = ["ea05","ea06"]
 
 def flag_spectrum(spectrum, win, threshold = 3):
 
@@ -93,7 +93,7 @@ class calibrate_uvh5:
             antdisp = redis_hget_keyvalues(self.redis_obj, "META_antennaDisplacement")
             sorted_antenna_name_list = list(
                 dict(
-                    sorted(antdisp.items(), key=lambda item: item[1])
+                    sorted(antdisp.items(), key=lambda item: item[1] if item[1] != -1.0 else float('inf'))
                 ).keys()
             )
         except:
@@ -108,12 +108,12 @@ class calibrate_uvh5:
             
             antind = self.metadata['ant_names'].index(antname)
             antnum = self.metadata['ant_numbers'].index(antind)
-            if antnum in self.metadata['ant_numbers_data']
+            if antnum in self.metadata['ant_numbers_data']:
                 return antname
 
         raise RuntimeError(
             f"Cannot select a reference antenna:\n\t"
-            f"len(META_antennaDisplacement): {len(andisp)}\n\t"
+            f"len(META_antennaDisplacement): {len(antdisp)}\n\t"
             f"BAD_REFANT: {BAD_REFANT}\n\t"
             f"sorted antenna names: {sorted_antenna_name_list}\n\t"
             f"observed antenna names: {observed_antenna_names}\n\t"
