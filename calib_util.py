@@ -11,15 +11,23 @@ from cupy import linalg as linalg_gpu
 from sliding_rfi_flagger import flag_rfi_complex_pol
 from scipy.stats import median_abs_deviation as mad
 
-def flag_complex_vis_medf(vis, threshold):
+def flag_complex_vis_medf(visibilities, threshold):
 
     """
-    Function to flag bad RFI channel using just median of the data
+    Function to flag bad RFI channel using just median of the data.
+
+    Accepts Visibilities of dimension [baseline, time, channel, pol] as well as a median threshold.
+
+    Returns a set of visibilities (same dimension) where if a channel contains data exceeding the threshold,
+    it is set to the median value. Also returns a 3 dimensional list [baseline, pol, channel] containing
+    the channel index of flagged visibilities for diagnostics.
     """
+    vis = visibilities.copy()
     nbls = vis.shape[0]
-    nfreqs = vis.shape[2]
     npols = vis.shape[3]
-
+    flagged_vis_indx = [[] for _ in range(nbls)] #no time dimension as median is taken across time - first dim is bl
+    # print(flagged_vis_indx)
+    # flagged_vis_indx = {} #Keyed by "bl_index:stream"
     print("Averaging the visibilities in time:")
 
     #Average the data along time axis
@@ -36,21 +44,32 @@ def flag_complex_vis_medf(vis, threshold):
             bad = np.argwhere(abs(spec[:,pol]-med) > threshold*abs(sig_md))
 
             #Replacing the bad RFI channels with the values from smooth bandpass model
-            for tm in range(vis.shape[1]):
-                vis[i,tm,bad,pol] = med
+            if bad.size != 0:
+                vis[i,:,bad,pol] = med
+                if pol == 0:
+                    flagged_vis_indx[i].extend(bad.tolist())
+    return vis, flagged_vis_indx
 
 
-def flag_complex_vis_smw(vis, threshold):
+def flag_complex_vis_smw(visibilities, threshold):
 
     """
     Function to flag bad RFI channel using a 
-    sliding median window:
+    sliding median window.
+
+    Accepts Visibilities of dimension [baseline, time, channel, pol] as well as a median threshold.
+
+    Returns a set of visibilities (same dimension) where if a channel contains data exceeding the threshold,
+    it is set to the median value. Also returns a 3 dimensional list [baseline, pol, channel] containing
+    the channel index of flagged visibilities for diagnostics.
     """
     
     #Getting number of baselines and frequencies
+    vis = visibilities.copy()
     nbls = vis.shape[0]
     nfreqs = vis.shape[2]
 
+    flagged_vis_indx = [[] for _ in range(nbls)] #no time dimension as median is taken across time - first dim is bl
     #choosing a window size, very important
     # Large window size needed if the the RFI is broad
     #choosing a minimum and maximum of 10 and 20 channels
@@ -73,11 +92,13 @@ def flag_complex_vis_smw(vis, threshold):
         #Getting a dict of bad channels per spectrum and smooth bandpass model per polarization
         bad_chans, smth_bp = flag_rfi_complex_pol(spec, win, threshold)
         
-        for pol in bad_chans.keys():
-            bad = bad_chans[pol]
+        for pol,bad in bad_chans.items():
             #Replacing the bad RFI channels with the values from smooth bandpass model
-            for tm in range(vis.shape[1]):
-                vis[i,tm,bad,pol] = smth_bp[bad, pol]
+            if bad.size != 0:
+                vis[i,:,bad,pol] = smth_bp[bad, pol]
+                if pol == 0:
+                    flagged_vis_indx[i].extend(bad.tolist())
+    return vis, flagged_vis_indx
 
 
 

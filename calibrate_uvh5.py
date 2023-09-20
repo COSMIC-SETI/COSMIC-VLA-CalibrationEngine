@@ -179,13 +179,29 @@ class calibrate_uvh5:
         """
         print("Starting RFI flagging now")
         t1 = time.time()
-        flag_complex_vis_medf(self.vis_data, threshold)
-        
+        self.vis_data, flagged_visibility_idx = flag_complex_vis_medf(self.vis_data, threshold)
+        flagged_freqs = self.derive_flagged_frequencies(flagged_visibility_idx, ref_ant = 'ea21')
         t2 = time.time()
         print(f"Flagging finished in {t2-t1}s")
+        return flagged_freqs
 
+    def derive_flagged_frequencies(self, flagged_visibility_idx, ref_ant):
+        """
+        The output from flagging complex visibilities is the visibility and an n_baselines
+        long list of flagged frequency indices for Stokes I.
 
-    def derive_gains(self, outdir,  ref_ant = 'ea12'):
+        Knowing the reference antenna and antenna present in the baselines it is possible to derive a list 
+        of flagged frequencies per antenna.
+        """
+        flagged_frequencies = {}
+        for bl in range(len(flagged_visibility_idx)):
+            [ant0, ant1] = self.ant_indices[bl]
+            if ant0 != ant1 and ant0 == int(ref_ant[2:]):
+                if len(flagged_visibility_idx[bl]) != 0:
+                    flagged_frequencies[ant1] = self.metadata['freq_array'][flagged_visibility_idx[bl]].tolist()
+        return flagged_frequencies
+
+    def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
@@ -203,9 +219,9 @@ class calibrate_uvh5:
         #    ant = "ea"+str(i).zfill(2)
         #    json_gain_dict['ant_gains'][ant] = {}
 
-        json_gain_dict = {'gains':{}, 'freqs_hz': self.metadata['freq_array'].tolist()}
-               
-        
+        json_gain_dict = {'gains':{}, 
+                          'freqs_hz': self.metadata['freq_array'].tolist(), 
+                          'flagged_hz':flagged_freqs}
         
         #Let's go through each antenna in the gain antenna list and update the gain values
         for i, ant in enumerate(gain_ant):
@@ -873,8 +889,9 @@ def main(args):
 
     #Flag the narrowband RFI in the data, use this before calculating delays and gains
     if args.flagrfi:
-        cal_ob.flag_rfi_vis(threshold = 5)
-
+        flagged_freqs = cal_ob.flag_rfi_vis(threshold = 5)
+    else:
+        flagged_freqs = None
 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Make a bunch of diagnostic plots before applying calibrations
@@ -905,7 +922,7 @@ def main(args):
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
 
-        outfile_gains = cal_ob.derive_gains(out_dir, ref_ant = refant)
+        outfile_gains = cal_ob.derive_gains(out_dir, ref_ant = refant, flagged_freqs = flagged_freqs)
         shutil.chown(outfile_gains, "cosmic", "cosmic")
 
     if args.genphase:
