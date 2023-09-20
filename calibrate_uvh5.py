@@ -105,9 +105,8 @@ class calibrate_uvh5:
             
             if antname in BAD_REFANT:
                 continue
-            
             antind = self.metadata['ant_names'].index(antname)
-            antnum = self.metadata['ant_numbers'].index(antind)
+            antnum = self.metadata['ant_numbers'][antind]
             if antnum in self.metadata['ant_numbers_data']:
                 return antname
 
