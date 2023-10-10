@@ -871,8 +871,7 @@ def main(args):
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
     out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration_gains")
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
         
     #Print the metdata of the input file
     if args.detail:
