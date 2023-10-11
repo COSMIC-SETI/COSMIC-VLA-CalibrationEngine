@@ -172,7 +172,7 @@ class calibrate_uvh5:
         outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0] +'.ms')
         return self.uvd.write_ms(outfile)
 
-    def flag_rfi_vis(self, threshold = 7):
+    def flag_rfi_vis(self, threshold = 3):
         """
         Flag RFI channels in the visibility data
 
@@ -182,6 +182,7 @@ class calibrate_uvh5:
         self.vis_data, flagged_visibility_idx = flag_complex_vis_medf(self.vis_data, threshold)
         flagged_freqs = self.derive_flagged_frequencies(flagged_visibility_idx, ref_ant = 'ea21')
         t2 = time.time()
+        print(f"Flagged frequencies: {flagged_freqs}")
         print(f"Flagging finished in {t2-t1}s")
         return flagged_freqs
 
@@ -195,10 +196,10 @@ class calibrate_uvh5:
         """
         flagged_frequencies = {}
         for bl in range(len(flagged_visibility_idx)):
-            [ant0, ant1] = self.ant_indices[bl]
+            ant0, ant1 = self.ant_indices[bl]
             if ant0 != ant1 and ant1 == int(ref_ant[2:]):
                 if len(flagged_visibility_idx[bl]) != 0:
-                    flagged_frequencies[ant0] = self.metadata['freq_array'][flagged_visibility_idx[bl]].tolist()
+                    flagged_frequencies["ea"+str(ant0).zfill(2)] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
         return flagged_frequencies
 
     def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None):
@@ -986,7 +987,7 @@ if __name__ == '__main__':
     os.makedirs(args.out_dir, exist_ok=True)
     try:
         # recursive_chown(args.out_dir, "cosmic", "cosmic")
-        os.system(f"chown cosmic:cosmic -R {args.out_dir}")
+        os.system(f"chown cosmic:swdev -R {args.out_dir}")
     except:
         pass
 
