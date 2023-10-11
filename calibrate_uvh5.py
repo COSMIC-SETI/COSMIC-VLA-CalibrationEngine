@@ -863,7 +863,7 @@ class calibrate_uvh5:
 
 def main(args):
     
-    outfile_phase, outfile_delays, outfile_gains = (None, None, None)
+    out_phase, outfile_delays, out_gains = (None, None, None)
 
     # Creating an object with the input data file from solutions needed to be derived
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
@@ -922,7 +922,7 @@ def main(args):
         
     if args.genphase:
         antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
-        out = {
+        out_phase = {
             'ant_names': antnames,
             'freqs_hz': cal_ob.metadata['freq_array'].tolist(),
             'phases_pol0': phases[:,0].tolist(),
@@ -930,11 +930,11 @@ def main(args):
         }
         outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
         with open(outfile_phase, 'w') as fh:
-            json.dump(out, fh)
+            json.dump(out_phase, fh)
         shutil.chown(outfile_phase, "cosmic", "cosmic")
             
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_out = out, delays_outfile = outfile_delays, gains_out = out_gains)
+        cal_ob.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
