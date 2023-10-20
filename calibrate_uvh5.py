@@ -19,7 +19,7 @@ from pyuvdata import UVData
 from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
 from sliding_rfi_flagger import flag_rfi_real
 
-BAD_REFANT = ["ea05","ea06"]
+BAD_REFANT = []#["ea05","ea06"]
 
 def flag_spectrum(spectrum, win, threshold = 3):
 
@@ -239,10 +239,14 @@ class calibrate_uvh5:
         #Writting the dictionary as a json file
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
-        print("Writing our the gains per antenna/freq/pols")
-        with open(outfile_json, "w") as jh:
-            json.dump(write_out_dict, jh)
-        shutil.chown(outfile_json, "cosmic", "cosmic")
+        try:
+            print("Writing our the gains per antenna/freq/pols")
+            with open(outfile_json, "w") as jh:
+                json.dump(write_out_dict, jh)
+            shutil.chown(outfile_json, "cosmic", "cosmic")
+        except:
+            print(f"Unable to create file {outfile_json}. Continuing without saving gain dictionary to disk...")
+            pass
 
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
@@ -412,7 +416,10 @@ class calibrate_uvh5:
                 fig.suptitle("Corrected: Phase vs Freq (averaged in time), RR, LL")
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile, dpi = 150)
+            try:
+                plt.savefig(outfile, dpi = 150)
+            except:
+                pass
             plt.close()
         
         
@@ -447,7 +454,10 @@ class calibrate_uvh5:
                     fig.suptitle("Corrected: Amplitude vs Freq (averaged in time), RR, LL")
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
-                plt.savefig(outfile, dpi = 150)
+                try:
+                    plt.savefig(outfile, dpi = 150)
+                except:
+                    pass
                 plt.close()
             
     def plot_phases_waterfall(self, data, outdir, track_phase = False):
@@ -492,7 +502,10 @@ class calibrate_uvh5:
             fig_ph1.suptitle("Phase vs Freq over time, RR")
             fig_ph1.supylabel("Time (s)")
             fig_ph1.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile_rr, dpi = 150)
+            try:
+                plt.savefig(outfile_rr, dpi = 150)
+            except:
+                pass
             plt.close()
         
     
@@ -516,7 +529,10 @@ class calibrate_uvh5:
             fig_ph2.suptitle("Phase vs Freq over time, LL")
             fig_ph2.supylabel("Time (s)")
             fig_ph2.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile_ll, dpi = 150)
+            try:
+                plt.savefig(outfile_ll, dpi = 150)
+            except:
+                pass
             plt.close()
 
         if track_phase:
@@ -548,7 +564,10 @@ class calibrate_uvh5:
                 fig_ph3.suptitle(f"Phase averaged (over frequency) vs time")
                 fig_ph3.supxlabel("Time (s)")
                 fig_ph3.supylabel("Phase averaged over frequency (degrees) ")
-                plt.savefig(outfile_ph_track, dpi = 150)
+                try:
+                    plt.savefig(outfile_ph_track, dpi = 150)
+                except:
+                    pass
                 plt.close()   
 
 
@@ -586,7 +605,11 @@ class calibrate_uvh5:
         #     tun = 'Unknown'
         tun = self.metadata['tuning']
         outfile_res = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0]+ f"_res_delay_{tun}.csv")
-        dh = open(outfile_res, "w")
+        try:
+            dh = open(outfile_res, "w")
+        except:
+            print(f"Unable to create {outfile_res}, cannot save delays to file - Aborting run.")
+            return None
 
         dh.write(",".join(
                 [
@@ -746,7 +769,10 @@ class calibrate_uvh5:
             fig_d1.suptitle("Delay vs time-lags over time, RR")
             fig_d1.supylabel("Time (s)")
             fig_d1.supxlabel("Time-lags (ns)")
-            plt.savefig(outfile_rr, dpi = 150)
+            try:
+                plt.savefig(outfile_rr, dpi = 150)
+            except:
+                pass
             plt.close()
         
 
@@ -780,7 +806,10 @@ class calibrate_uvh5:
             fig_d2.suptitle("Delay vs time-lags over time, LL")
             fig_d2.supylabel("Time (s)")
             fig_d2.supxlabel("Time-lags (ns)")
-            plt.savefig(outfile_ll, dpi = 150)
+            try:
+                plt.savefig(outfile_ll, dpi = 150)
+            except:
+                pass
             plt.close()
 
         #plotting the delay values
@@ -806,7 +835,10 @@ class calibrate_uvh5:
                 fig_d3.suptitle(f"Delay peaks vs time, delay resolution: {round(tlags[1] - tlags[0], 3)} ns")
                 fig_d3.supxlabel("Time (s)")
                 fig_d3.supylabel("Delay peak (ns)")
-                plt.savefig(outfile_peak, dpi = 150)
+                try:
+                    plt.savefig(outfile_peak, dpi = 150)
+                except:
+                    pass
                 plt.close()    
             
     
@@ -869,14 +901,20 @@ def main(args):
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
     out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration_gains")
-    os.makedirs(out_dir, exist_ok=True)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        save_file_products = True
+    except:
+        print(f"Unable to create directory {out_dir}, no solutions/metadata from this calibration run will be saved to file.")
+        save_file_products = False
         
     #Print the metdata of the input file
     if args.detail:
         detail = cal_ob.print_metadata()
         print(detail)
-        with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
-            f.write(detail)
+        if save_file_products:
+            with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
+                f.write(detail)
     refant = cal_ob.get_refant()
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
@@ -929,9 +967,14 @@ def main(args):
             'phases_pol1': phases[:,1].tolist(),
         }
         outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
-        with open(outfile_phase, 'w') as fh:
-            json.dump(out_phase, fh)
-        shutil.chown(outfile_phase, "cosmic", "cosmic")
+        try:
+            with open(outfile_phase, 'w') as fh:
+                json.dump(out_phase, fh)
+            shutil.chown(outfile_phase, "cosmic", "cosmic")
+        except:
+            print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
+            pass
+
             
     if args.pub_to_redis:
         cal_ob.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
