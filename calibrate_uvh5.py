@@ -197,9 +197,9 @@ class calibrate_uvh5:
         flagged_frequencies = {}
         for bl in range(len(flagged_visibility_idx)):
             ant0, ant1 = self.ant_indices[bl]
-            if ant0 != ant1 and ant1 == int(ref_ant[2:]):
+            if ant0 != ant1 and self.metadata['ant_names'][ant1] == ref_ant:
                 if len(flagged_visibility_idx[bl]) != 0:
-                    flagged_frequencies["ea"+str(ant0).zfill(2)] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
+                    flagged_frequencies[self.metadata['ant_names'][ant0]] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
         return flagged_frequencies
 
     def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None):
