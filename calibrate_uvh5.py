@@ -16,10 +16,10 @@ from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
-from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis
+from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
 from sliding_rfi_flagger import flag_rfi_real
 
-
+BAD_REFANT = []#["ea05","ea06"]
 
 def flag_spectrum(spectrum, win, threshold = 3):
 
@@ -64,8 +64,9 @@ class calibrate_uvh5:
         time_array = np.arange(self.uvd.Ntimes)*self.uvd.integration_time[0]
         metadata  = {'nant_data' : self.uvd.Nants_data,
         'nant_array' : self.uvd.Nants_telescope,
-        'ant_names' : self.uvd.antenna_names, 
-        'ant_curr' : self.uvd.get_ants(),
+        'ant_names' : list(self.uvd.antenna_names),
+        'ant_numbers' : list(self.uvd.antenna_numbers),
+        'ant_numbers_data' : self.uvd.get_ants(),
         'nfreqs' : self.uvd.Nfreqs,
         'ntimes' : self.uvd.Ntimes,
         'npols': self.uvd.Npols,
@@ -84,17 +85,39 @@ class calibrate_uvh5:
         return metadata
 
     def get_refant(self):
+        observed_antenna_names = [
+            self.metadata['ant_names'][self.metadata['ant_numbers'].index(antnum)]
+            for antnum in self.metadata['ant_numbers_data']
+        ]
         try:
             antdisp = redis_hget_keyvalues(self.redis_obj, "META_antennaDisplacement")
-            sorted_antdispmap = dict(sorted(antdisp.items(), key=lambda item: item[1]))
+            sorted_antenna_name_list = list(
+                dict(
+                    sorted(antdisp.items(), key=lambda item: item[1] if item[1] != -1.0 else float('inf'))
+                ).keys()
+            )
         except:
-            return None
-        for ant, _ in sorted_antdispmap.items():
-            if ant in self.metadata['ant_names']:
-                return ant
-            else:
+            sorted_antenna_name_list = observed_antenna_names
+
+        for antname in sorted_antenna_name_list:
+            if antname not in self.metadata['ant_names']:
                 continue
-        return None
+            
+            if antname in BAD_REFANT:
+                continue
+            antind = self.metadata['ant_names'].index(antname)
+            antnum = self.metadata['ant_numbers'][antind]
+            if antnum in self.metadata['ant_numbers_data']:
+                return antname
+
+        raise RuntimeError(
+            f"Cannot select a reference antenna:\n\t"
+            f"len(META_antennaDisplacement): {len(antdisp)}\n\t"
+            f"BAD_REFANT: {BAD_REFANT}\n\t"
+            f"sorted antenna names: {sorted_antenna_name_list}\n\t"
+            f"observed antenna names: {observed_antenna_names}\n\t"
+        )
+
 
     def print_metadata(self):
         #Return string of full observation details
@@ -114,7 +137,7 @@ class calibrate_uvh5:
                 Data array shape: {self.vis_data.shape} \n\
                 No. of baselines: {self.metadata['nbls']}  \n\
                 No. of antennas present in data: {self.metadata['nant_data']} \n\
-                Current antenna list in the data: {self.metadata['ant_curr']} \n\
+                Current antenna list in the data: {self.metadata['ant_numbers_data']} \n\
                 No. of antennas in the array: {self.metadata['nant_array']} \n\
                 Antenna name: {self.metadata['ant_names']} \n\
                 Tuning: {self.metadata['tuning']}\n\
@@ -149,21 +172,40 @@ class calibrate_uvh5:
         outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0] +'.ms')
         return self.uvd.write_ms(outfile)
 
-    def flag_rfi_vis(self, threshold = 7):
+    def flag_rfi_vis(self, threshold = 3):
         """
         Flag RFI channels in the visibility data
 
         """
         print("Starting RFI flagging now")
         t1 = time.time()
-        flag_complex_vis(self.vis_data, threshold)
-        #flag_complex_vis_proto(self.vis_data, threshold)
-        
+        self.vis_data, flagged_visibility_idx = flag_complex_vis_medf(self.vis_data, threshold)
+        flagged_freqs = self.derive_flagged_frequencies(flagged_visibility_idx, ref_ant = 'ea21')
         t2 = time.time()
+        print(f"Flagged frequencies: {flagged_freqs}")
         print(f"Flagging finished in {t2-t1}s")
+        return flagged_freqs
 
+    def derive_flagged_frequencies(self, flagged_visibility_idx, ref_ant):
+        """
+        The output from flagging complex visibilities is the visibility and an n_baselines
+        long list of flagged frequency indices for Stokes I.
 
-    def derive_gains(self, outdir,  ref_ant = 'ea12'):
+        Knowing the reference antenna and antenna present in the baselines it is possible to derive a list 
+        of flagged frequencies per antenna.
+        """
+        flagged_frequencies = {}
+        for bl in range(len(flagged_visibility_idx)):
+            ant0, ant1 = self.ant_indices[bl]
+            if ant0 != ant1:
+                if len(flagged_visibility_idx[bl]) != 0:
+                    if self.metadata['ant_names'][ant1] == ref_ant:
+                        flagged_frequencies[self.metadata['ant_names'][ant0]] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
+                    elif self.metadata['ant_names'][ant0] == ref_ant:
+                        flagged_frequencies[self.metadata['ant_names'][ant1]] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
+        return flagged_frequencies
+
+    def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
@@ -173,7 +215,7 @@ class calibrate_uvh5:
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
         antind = int(ref_ant[2:])
-        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_curr'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
+        gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
         
@@ -181,9 +223,9 @@ class calibrate_uvh5:
         #    ant = "ea"+str(i).zfill(2)
         #    json_gain_dict['ant_gains'][ant] = {}
 
-        json_gain_dict = {'gains':{}, 'freqs_hz': self.metadata['freq_array'].tolist()}
-               
-        
+        json_gain_dict = {'gains':{}, 
+                          'freqs_hz': self.metadata['freq_array'].tolist(), 
+                          'flagged_hz':flagged_freqs}
         
         #Let's go through each antenna in the gain antenna list and update the gain values
         for i, ant in enumerate(gain_ant):
@@ -200,16 +242,21 @@ class calibrate_uvh5:
         #Writting the dictionary as a json file
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
-        print("Writing our the gains per antenna/freq/pols")
-        with open(outfile_json, "w") as jh:
-            json.dump(write_out_dict, jh)
+        try:
+            print("Writing our the gains per antenna/freq/pols")
+            with open(outfile_json, "w") as jh:
+                json.dump(write_out_dict, jh)
+            shutil.chown(outfile_json, "cosmic", "cosmic")
+        except:
+            print(f"Unable to create file {outfile_json}. Continuing without saving gain dictionary to disk...")
+            pass
 
         t2 = time.time()
         print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
 
         print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
         
-        return outfile_json
+        return write_out_dict
 
     def apply_gains(self, gainsol):
         """
@@ -218,7 +265,7 @@ class calibrate_uvh5:
         correlated matrix would be difficult
         """
         data_cp = self.vis_data.copy()
-        applycal(data_cp, gainsol, self.metadata['ant_curr'], self.ant_indices, axis=0, phaseonly=False)
+        applycal(data_cp, gainsol, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
         print(self.vis_data.dtype)
         return data_cp
     
@@ -372,7 +419,10 @@ class calibrate_uvh5:
                 fig.suptitle("Corrected: Phase vs Freq (averaged in time), RR, LL")
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile, dpi = 150)
+            try:
+                plt.savefig(outfile, dpi = 150)
+            except:
+                pass
             plt.close()
         
         
@@ -407,7 +457,10 @@ class calibrate_uvh5:
                     fig.suptitle("Corrected: Amplitude vs Freq (averaged in time), RR, LL")
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
-                plt.savefig(outfile, dpi = 150)
+                try:
+                    plt.savefig(outfile, dpi = 150)
+                except:
+                    pass
                 plt.close()
             
     def plot_phases_waterfall(self, data, outdir, track_phase = False):
@@ -452,7 +505,10 @@ class calibrate_uvh5:
             fig_ph1.suptitle("Phase vs Freq over time, RR")
             fig_ph1.supylabel("Time (s)")
             fig_ph1.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile_rr, dpi = 150)
+            try:
+                plt.savefig(outfile_rr, dpi = 150)
+            except:
+                pass
             plt.close()
         
     
@@ -476,7 +532,10 @@ class calibrate_uvh5:
             fig_ph2.suptitle("Phase vs Freq over time, LL")
             fig_ph2.supylabel("Time (s)")
             fig_ph2.supxlabel("Frequency (GHz)")
-            plt.savefig(outfile_ll, dpi = 150)
+            try:
+                plt.savefig(outfile_ll, dpi = 150)
+            except:
+                pass
             plt.close()
 
         if track_phase:
@@ -508,7 +567,10 @@ class calibrate_uvh5:
                 fig_ph3.suptitle(f"Phase averaged (over frequency) vs time")
                 fig_ph3.supxlabel("Time (s)")
                 fig_ph3.supylabel("Phase averaged over frequency (degrees) ")
-                plt.savefig(outfile_ph_track, dpi = 150)
+                try:
+                    plt.savefig(outfile_ph_track, dpi = 150)
+                except:
+                    pass
                 plt.close()   
 
 
@@ -546,7 +608,11 @@ class calibrate_uvh5:
         #     tun = 'Unknown'
         tun = self.metadata['tuning']
         outfile_res = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0]+ f"_res_delay_{tun}.csv")
-        dh = open(outfile_res, "w")
+        try:
+            dh = open(outfile_res, "w")
+        except:
+            print(f"Unable to create {outfile_res}, cannot save delays to file - Aborting run.")
+            return None
 
         dh.write(",".join(
                 [
@@ -706,7 +772,10 @@ class calibrate_uvh5:
             fig_d1.suptitle("Delay vs time-lags over time, RR")
             fig_d1.supylabel("Time (s)")
             fig_d1.supxlabel("Time-lags (ns)")
-            plt.savefig(outfile_rr, dpi = 150)
+            try:
+                plt.savefig(outfile_rr, dpi = 150)
+            except:
+                pass
             plt.close()
         
 
@@ -740,7 +809,10 @@ class calibrate_uvh5:
             fig_d2.suptitle("Delay vs time-lags over time, LL")
             fig_d2.supylabel("Time (s)")
             fig_d2.supxlabel("Time-lags (ns)")
-            plt.savefig(outfile_ll, dpi = 150)
+            try:
+                plt.savefig(outfile_ll, dpi = 150)
+            except:
+                pass
             plt.close()
 
         #plotting the delay values
@@ -766,29 +838,30 @@ class calibrate_uvh5:
                 fig_d3.suptitle(f"Delay peaks vs time, delay resolution: {round(tlags[1] - tlags[0], 3)} ns")
                 fig_d3.supxlabel("Time (s)")
                 fig_d3.supylabel("Delay peak (ns)")
-                plt.savefig(outfile_peak, dpi = 150)
+                try:
+                    plt.savefig(outfile_peak, dpi = 150)
+                except:
+                    pass
                 plt.close()    
             
     
-    def pub_to_redis(self, phase_outfile = None, delays_outfile = None, gains_outfile = None):
+    def pub_to_redis(self, phase_out = None, delays_outfile = None, gains_out = None):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
-        if phase_outfile is not None:
+        if phase_out is not None:
             try:
                 pubsub.subscribe("gpu_calibrationphases")
             except redis.RedisError:
                 raise redis.RedisError("""Unable to subscribe to gpu_calibrationphases channel to notify of 
                 changes to GPU_calibrationPhases changes.""")
-            with open(phase_outfile) as f:
-                phase_dict = json.load(f)
-            ant_names = phase_dict['ant_names']
-            phase_vals_0 = phase_dict['phases_pol0']
-            phase_vals_1 = phase_dict['phases_pol1']
+            ant_names = phase_out['ant_names']
+            phase_vals_0 = phase_out['phases_pol0']
+            phase_vals_1 = phase_out['phases_pol1']
 
             dict_to_pub = {}
             for i, ant in enumerate(ant_names):
                 dict_to_pub[ant] = {
-                    'freq_array' : phase_dict['freqs_hz'],
+                    'freq_array' : phase_out['freqs_hz'],
                     'pol0_phases' : phase_vals_0[i],
                     'pol1_phases' : phase_vals_1[i]
                 }
@@ -814,39 +887,49 @@ class calibrate_uvh5:
             self.redis_obj.hset("GPU_calibrationDelays", str(self.metadata['freq_array'][0]/1e+6)+","+self.metadata["tuning"], json.dumps(dict_to_pub))
             self.redis_obj.publish("gpu_calibrationdelays", json.dumps(True))
 
-        if gains_outfile is not None:
+        if gains_out is not None:
             try:
                 pubsub.subscribe("gpu_calibrationgains")
             except redis.RedisError:
                 raise redis.RedisError("""Unable to subscribe to gpu_calibrationdelays channel to notify of 
                 changes to GPU_calibrationDelays changes.""")
-            with open(gains_outfile) as f:
-                residual_gains = json.load(f)
-            redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", residual_gains)
+            redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", gains_out)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
 def main(args):
     
-    outfile_phase, outfile_delays, outfile_gains = (None, None, None)
+    out_phase, outfile_delays, out_gains = (None, None, None)
 
     # Creating an object with the input data file from solutions needed to be derived
     cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
     
     out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration_gains")
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        save_file_products = True
+    except:
+        print(f"Unable to create directory {out_dir}, no solutions/metadata from this calibration run will be saved to file.")
+        save_file_products = False
         
     #Print the metdata of the input file
     if args.detail:
         detail = cal_ob.print_metadata()
         print(detail)
-        with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
-            f.write(detail)
+        if save_file_products:
+            with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
+                f.write(detail)
     refant = cal_ob.get_refant()
-    refant = refant if  refant is not None else "ea23"
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
+
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    #Flag the narrowband RFI in the data, use this before calculating delays and gains
+    if args.flagrfi:
+        flagged_freqs = cal_ob.flag_rfi_vis(threshold = 5)
+    else:
+        flagged_freqs = None
 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #Make a bunch of diagnostic plots before applying calibrations
@@ -865,12 +948,6 @@ def main(args):
     
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
-    #Flag the narrowband RFI in the data, use this before calculating delays and gains
-    if args.flagrfi:
-        cal_ob.flag_rfi_vis(threshold = 5)
-
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    
     #Calculate the delays and spit out the delay values per baseline in the out_dir
     if args.gendelay:
         outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir, ref_ant = refant)
@@ -882,25 +959,28 @@ def main(args):
     #The gain dictinary obtained from sdmpy
     # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
     if args.gengain:
-
-        outfile_gains = cal_ob.derive_gains(out_dir, ref_ant = refant)
-        shutil.chown(outfile_gains, "cosmic", "cosmic")
-
+        out_gains = cal_ob.derive_gains(out_dir, ref_ant = refant, flagged_freqs = flagged_freqs)
+        
     if args.genphase:
         antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
-        out = {
+        out_phase = {
             'ant_names': antnames,
             'freqs_hz': cal_ob.metadata['freq_array'].tolist(),
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
         outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
-        with open(outfile_phase, 'w') as fh:
-            json.dump(out, fh)
-        shutil.chown(outfile_phase, "cosmic", "cosmic")
+        try:
+            with open(outfile_phase, 'w') as fh:
+                json.dump(out_phase, fh)
+            shutil.chown(outfile_phase, "cosmic", "cosmic")
+        except:
+            print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
+            pass
+
             
     if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_outfile = outfile_phase, delays_outfile = outfile_delays, gains_outfile = outfile_gains)
+        cal_ob.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
     #Plotting amplitude and phase of the gain solutions
     #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
@@ -948,7 +1028,7 @@ if __name__ == '__main__':
     os.makedirs(args.out_dir, exist_ok=True)
     try:
         # recursive_chown(args.out_dir, "cosmic", "cosmic")
-        os.system(f"chown cosmic:cosmic -R {args.out_dir}")
+        os.system(f"chown cosmic:swdev -R {args.out_dir}")
     except:
         pass
 
