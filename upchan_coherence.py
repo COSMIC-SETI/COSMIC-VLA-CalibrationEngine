@@ -20,7 +20,7 @@ import tqdm as tq
 from matplotlib import pyplot as plt
 import argparse
 from sliding_rfi_flagger import flag_rfi
-from compute_uvw import vla_uvw
+#from compute_uvw import vla_uvw
 from antfxdelay_from_baselinefxdelay import antfxdelay_from_baselinefxdelay
 from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_dict_to_hash
 
@@ -48,7 +48,8 @@ def main(
     crosscorr_channel_time_promptplot,
     autocorr_show_phase = False,
     autocorr_cross_polarizations = False,
-    reference_antenna = None
+    reference_antenna = None,
+    calculate_geo_delay = False
 ):
     if output_directory is None:
         output_directory = os.path.dirname(dat_file)
@@ -161,8 +162,8 @@ def main(
     data0 = np.transpose(data0, axes=(0,2,1,3,4))
     print(f"Transposed to {data0.shape}")
     # reshape to [A,Tfine,C*Tfft,P]
-    data = data0.reshape(nant, ntsampfine, nchan_fine, npols)
-    print(f"Second reshape to {data.shape}")
+    data0 = data0.reshape(nant, ntsampfine, nchan_fine, npols)
+    print(f"Second reshape to {data0.shape}")
     # select band
     band_lower = int(nchan_fine*band_bottom)
     band_upper = int(nchan_fine*band_top + 0.5)
@@ -170,7 +171,7 @@ def main(
     ncoarse_chan_required = int(np.ceil(band_length/nfine))
     band_upper_padding = ncoarse_chan_required*nfine - band_length
     print(f"Selecting [{band_bottom}, {band_top}] of the channels data, range [{band_lower}, {band_upper}).")
-    data = data[:, :, band_lower:band_upper+band_upper_padding, :]
+    data = data0[:, :, band_lower:band_upper+band_upper_padding, :]
     # reshape to [A, Tfine, C, Tfft, P]
     data = data.reshape(nant, ntsampfine, ncoarse_chan_required, nfine, npols)
 
@@ -240,13 +241,17 @@ def main(
     )
         
     # Geometric delay terms
-    geo_delays = calculate_geo_delay(
-        telinfo_file,
-        mjd_now,
-        ra_degrees,
-        dec_degrees,
-        ants
-    )
+    if calculate_geo_delay:
+        from compute_uvw import vla_uvw
+        geo_delays = calculate_geo_delay(
+            telinfo_file,
+            mjd_now,
+            ra_degrees,
+            dec_degrees,
+            ants
+        )
+    else:
+        geo_delays = np.zeros(nant)
 
     #Seperating out the data from two antennas into a different array and changing their order
     print(f"ERROR, reference antenna {reference_antenna} not in observed antenna: {ants}")

@@ -182,7 +182,6 @@ class calibrate_uvh5:
         self.vis_data, flagged_visibility_idx = flag_complex_vis_medf(self.vis_data, threshold)
         flagged_freqs = self.derive_flagged_frequencies(flagged_visibility_idx, ref_ant = 'ea21')
         t2 = time.time()
-        print(f"Flagged frequencies: {flagged_freqs}")
         print(f"Flagging finished in {t2-t1}s")
         return flagged_freqs
 
@@ -266,7 +265,6 @@ class calibrate_uvh5:
         """
         data_cp = self.vis_data.copy()
         applycal(data_cp, gainsol, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
-        print(self.vis_data.dtype)
         return data_cp
     
 
@@ -322,7 +320,6 @@ class calibrate_uvh5:
                 for j in range(grid_y):
                     rbl = (i*grid_y)+j
                     bl = grid_val*n + rbl
-                    #print(bl)
                     if bl < nant:
 
                         #Picking the antenna
@@ -651,11 +648,9 @@ class calibrate_uvh5:
             ant2_str = 'ea' + str(ant2[bl]).zfill(2)
             #bls_str = 'ea'+ ant1_str +'-ea'+ ant2_str
             ant_base = [ant1_str, ant2_str]
-            #print(ant_base)
             if ref_ant in ant_base:
                 ant_base.remove(ref_ant)
                 ant_new = ant_base[0]
-                #print(ant_new)
                 if ant1_str == ref_ant and ant2_str == ref_ant:
                    #if both antennas are the ref antenna case
                     dh.write(f"{ant_new}, {np.mean(delay_vals[bl,:,0])}, {np.mean(delay_vals[bl,:,1])} \n")
