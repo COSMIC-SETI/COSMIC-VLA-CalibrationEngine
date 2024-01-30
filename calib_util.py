@@ -6,8 +6,6 @@ Also, contains a RFI flagging routines for COSMIC
 
 import numpy as np
 from numpy import linalg as linalg_cpu
-import cupy as cp
-from cupy import linalg as linalg_gpu
 from sliding_rfi_flagger import flag_rfi_complex_pol
 from scipy.stats import median_abs_deviation as mad
 
@@ -176,6 +174,9 @@ def gaincal_gpu(data, nant, ant_indices, axis=0, ref=0, avg=[], nit=3):
     of axes to average over before solving can be given in the avg
     argument (length-1 dimensions are kept so that the solution can be
     applied to the original data)."""
+
+    import cupy as cp
+    from cupy import linalg as linalg_gpu
 
     nbl = data.shape[axis]
     ndim = len(data.shape)

@@ -896,14 +896,21 @@ class calibrate_uvh5:
             redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", gains_out)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
-def main(args):
+def main(uvh5_file_path, args):
+
+    print(f"Processing {uvh5_file_path} now...\n")
     
     out_phase, outfile_delays, out_gains = (None, None, None)
 
     # Creating an object with the input data file from solutions needed to be derived
-    cal_ob = calibrate_uvh5(args.dat_file, redis_obj)
-    
-    out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration_gains")
+    cal_ob = calibrate_uvh5(uvh5_file_path, redis_obj)
+
+    #derive output path
+    if args.out_dir is None:
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(uvh5_file_path)), "calibration/calibration_gains")
+    else:
+        out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration/calibration_gains")
+
     try:
         os.makedirs(out_dir, exist_ok=True)
         save_file_products = True
@@ -969,7 +976,7 @@ def main(args):
             'phases_pol0': phases[:,0].tolist(),
             'phases_pol1': phases[:,1].tolist(),
         }
-        outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(args.dat_file))[0] + '_phasecal.json')
+        outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(uvh5_file_path))[0] + '_phasecal.json')
         try:
             with open(outfile_phase, 'w') as fh:
                 json.dump(out_phase, fh)
@@ -1003,9 +1010,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Reads UVH5 files, derives delay and gain calibrations, apply to the data, make a bunch of diagnostic plots',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-d','--dat_file', type = str, required = True, help = 'UVH5 file to derive delay and phase calibrations')
+    parser.add_argument('paths', nargs='*', help = 'UVH5 file/files to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
-    parser.add_argument('-o','--out_dir', type = str, required = True, help = 'Output directory to save the plots')
+    parser.add_argument('-o','--out_dir', type = str, required = False, help = 'Output directory to save the plots - if not provided, will write out gains to same directory as input uvh5')
     parser.add_argument('--flagrfi', action='store_true',
             help = 'If set, flag the narrowband RFI in the dataset')
     parser.add_argument('--gengain', action='store_true',
@@ -1025,14 +1032,24 @@ if __name__ == '__main__':
     If specified, generate and save delay waterfall plots""")
     args = parser.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    try:
-        # recursive_chown(args.out_dir, "cosmic", "cosmic")
-        os.system(f"chown cosmic:swdev -R {args.out_dir}")
-    except:
-        pass
+    # try:
+    #     # recursive_chown(args.out_dir, "cosmic", "cosmic")
+    #     os.system(f"chown cosmic:swdev -R {args.out_dir}")
+    # except:
+    #     pass
 
-    main(args)
+    if len(args.paths) != 0:
+        for path in args.paths:
+            #iterate through all *.uvh5 files
+            if os.path.isfile(path):
+                file_path = path
+                main(file_path, args)
+            elif os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        if file.endswith('.uvh5'):
+                            file_path = os.path.join(root, file)
+                            main(file_path, args)
 
 
 
