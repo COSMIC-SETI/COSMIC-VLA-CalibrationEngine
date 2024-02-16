@@ -925,7 +925,10 @@ def main(uvh5_file_path, args):
         if save_file_products:
             with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
                 f.write(detail)
-    refant = cal_ob.get_refant()
+    if args.refant is None:
+        refant = cal_ob.get_refant()
+    else:
+        refant = args.refant
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
@@ -1013,6 +1016,7 @@ if __name__ == '__main__':
     parser.add_argument('paths', nargs='*', help = 'UVH5 file/files to derive delay and phase calibrations')
     parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
     parser.add_argument('-o','--out_dir', type = str, required = False, help = 'Output directory to save the plots - if not provided, will write out gains to same directory as input uvh5')
+    parser.add_argument('--refant', type = str, required = False, help = 'Reference antenna to use in gain derivation')
     parser.add_argument('--flagrfi', action='store_true',
             help = 'If set, flag the narrowband RFI in the dataset')
     parser.add_argument('--gengain', action='store_true',
