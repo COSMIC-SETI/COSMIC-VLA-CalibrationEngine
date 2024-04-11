@@ -5,9 +5,29 @@ Also, contains a RFI flagging routines for COSMIC
 """
 
 import numpy as np
+import warnings
 from numpy import linalg as linalg_cpu
 from sliding_rfi_flagger import flag_rfi_complex_pol
 from scipy.stats import median_abs_deviation as mad
+
+def calc_gain_grade(gain_matrix):
+    """
+    Accept matrix of gain values of shape (n_ant, n_freqs) and calculate the full grade
+
+    Args:
+        gain_matrix : A matrix of shape (n_ant, n_freqs) containing gain values
+
+    Return:
+        grade: A single grade value - where sum of the grades is 0, return -1.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", category=RuntimeWarning)
+            grade = np.abs(np.sum(gain_matrix))/np.sum(np.abs(gain_matrix))
+    except (ZeroDivisionError, RuntimeWarning):
+        grade = -1.0
+    return grade
+
 
 def flag_complex_vis_medf(visibilities, threshold):
 
