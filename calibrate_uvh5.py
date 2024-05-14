@@ -223,8 +223,10 @@ class calibrate_uvh5:
         gain_ant = gainsol_dict['antennas']
 
         if calculate_grade:
+            gain_grade = calc_gain_grade(gain)
             #we can overwrite the visibility data rather than make a copy as we have already derived our gains and it saves time
             applycal(self.vis_data, gainsol_dict, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
+            # self.plot_phases_vs_freq(self.vis_data, os.path.join(outdir,'plots'), plot_amp = True, corrected = True)
             proposed_gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
             proposed_gain = np.squeeze(proposed_gainsol_dict['gain_val'])
             proposed_gain_grade = calc_gain_grade(proposed_gain)
@@ -248,7 +250,9 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
         json_gain_dict['obs_id'] = self.metadata['obs_id']
         json_gain_dict['ref_ant'] = ref_ant
-        json_gain_dict['proposed_gain_grade'] = proposed_gain_grade
+        if calculate_grade:
+            json_gain_dict['grade'] = gain_grade
+            json_gain_dict['proposed_gain_grade'] = proposed_gain_grade
         write_out_dict = {}
         write_out_dict[str(min(self.metadata['freq_array'])/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
         #Writting the dictionary as a json file
@@ -403,7 +407,10 @@ class calibrate_uvh5:
         grid_val = grid_x*grid_y
         nplts = int(np.ceil(nbls/(grid_val)))
         
-        
+        #check if outdir exists, if not, create dir:
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+
         for n in range(nplts):
             if not corrected:
                 outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_uncor_phase_freq_{n}.png")
@@ -432,8 +439,10 @@ class calibrate_uvh5:
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
             try:
+                print(f"Writing to: {outfile}")
                 plt.savefig(outfile, dpi = 150)
-            except:
+            except Exception as e:
+                print(f"Encountered an error while saving the plot {e}")
                 pass
             plt.close()
         
@@ -470,8 +479,10 @@ class calibrate_uvh5:
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
                 try:
+                    print(f"Writing to: {outfile}")
                     plt.savefig(outfile, dpi = 150)
-                except:
+                except Exception as e:
+                    print(f"Encountered an error while saving the plot {e}")
                     pass
                 plt.close()
             
