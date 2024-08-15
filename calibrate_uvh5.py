@@ -1001,6 +1001,7 @@ def main(uvh5_file_path, args):
     #cal_data_apply = cal_apply_ob.apply_phase(gain_dict) #Gain derived from a different file
     #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
     
+    print(out_dir)
     
 if __name__ == '__main__':
     
