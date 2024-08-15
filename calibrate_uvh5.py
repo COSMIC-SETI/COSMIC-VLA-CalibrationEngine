@@ -16,7 +16,7 @@ from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
-from calib_util import gaincal_cpu, gaincal_gpu, applycal, flag_complex_vis_smw, flag_complex_vis_medf
+from calib_util import gaincal_cpu, applycal, flag_complex_vis_medf, calc_gain_grade
 from sliding_rfi_flagger import flag_rfi_real
 
 BAD_REFANT = []#["ea05","ea06"]
@@ -204,10 +204,13 @@ class calibrate_uvh5:
                         flagged_frequencies[self.metadata['ant_names'][ant1]] = self.metadata['freq_array'][np.array(flagged_visibility_idx[bl]).flatten()].tolist()
         return flagged_frequencies
 
-    def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None):
+    def derive_gains(self, outdir,  ref_ant = 'ea12', flagged_freqs = None, calculate_grade = False):
         """
         Derive gains per antenna/channel/polarizations
         using some of the sdmpy calibration codes
+
+        If calculate_grade is True, apply gains to visibilities and recalculate the gains. From these secondary
+        gains, calculate a grade.
         """
 
         print("Deriving Calibrations now")
@@ -217,6 +220,16 @@ class calibrate_uvh5:
         gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
         gain = np.squeeze(gainsol_dict['gain_val'])
         gain_ant = gainsol_dict['antennas']
+
+        if calculate_grade:
+            gain_grade = calc_gain_grade(gain)
+            #we can overwrite the visibility data rather than make a copy as we have already derived our gains and it saves time
+            applycal(self.vis_data, gainsol_dict, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
+            # self.plot_phases_vs_freq(self.vis_data, os.path.join(outdir,'plots'), plot_amp = True, corrected = True)
+            proposed_gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
+            proposed_gain = np.squeeze(proposed_gainsol_dict['gain_val'])
+            proposed_gain_grade = calc_gain_grade(proposed_gain)
+            print(f"Calculated proposed gain grade of: {proposed_gain_grade}")
         
         #for i in range(1,29):
         #    ant = "ea"+str(i).zfill(2)
@@ -236,6 +249,9 @@ class calibrate_uvh5:
             json_gain_dict['gains'][ant_str]['gain_pol1_imag'] = gain[i, :, 3].imag.tolist()
         json_gain_dict['obs_id'] = self.metadata['obs_id']
         json_gain_dict['ref_ant'] = ref_ant
+        if calculate_grade:
+            json_gain_dict['grade'] = gain_grade
+            json_gain_dict['proposed_gain_grade'] = proposed_gain_grade
         write_out_dict = {}
         write_out_dict[str(min(self.metadata['freq_array'])/1e+6)+","+self.metadata["tuning"]] = json_gain_dict
         #Writting the dictionary as a json file
@@ -388,7 +404,10 @@ class calibrate_uvh5:
         grid_val = grid_x*grid_y
         nplts = int(np.ceil(nbls/(grid_val)))
         
-        
+        #check if outdir exists, if not, create dir:
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+
         for n in range(nplts):
             if not corrected:
                 outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_uncor_phase_freq_{n}.png")
@@ -417,8 +436,10 @@ class calibrate_uvh5:
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
             try:
+                print(f"Writing to: {outfile}")
                 plt.savefig(outfile, dpi = 150)
-            except:
+            except Exception as e:
+                print(f"Encountered an error while saving the plot {e}")
                 pass
             plt.close()
         
@@ -455,8 +476,10 @@ class calibrate_uvh5:
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
                 try:
+                    print(f"Writing to: {outfile}")
                     plt.savefig(outfile, dpi = 150)
-                except:
+                except Exception as e:
+                    print(f"Encountered an error while saving the plot {e}")
                     pass
                 plt.close()
             
@@ -957,15 +980,7 @@ def main(uvh5_file_path, args):
     if args.gendelay:
         outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir, ref_ant = refant)
         shutil.chown(outfile_delays, "cosmic", "cosmic")
-    
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #Derive the gain solutions from the visibility data
-    
-    #The gain dictinary obtained from sdmpy
-    # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
-    if args.gengain:
-        out_gains = cal_ob.derive_gains(out_dir, ref_ant = refant, flagged_freqs = flagged_freqs)
-        
+       
     if args.genphase:
         antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
         out_phase = {
@@ -983,6 +998,12 @@ def main(uvh5_file_path, args):
             print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
             pass
 
+    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #Derive the gain solutions from the visibility data
+    #The gain dictinary obtained from sdmpy
+    # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
+    if args.gengain:
+        out_gains = cal_ob.derive_gains(out_dir, ref_ant = refant, flagged_freqs = flagged_freqs, calculate_grade=args.calc_gain_grade)
             
     if args.pub_to_redis:
         cal_ob.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
@@ -1019,6 +1040,8 @@ if __name__ == '__main__':
             help = 'If set, generate a json file of output gain per antenna/freq/pol')
     parser.add_argument('--genphase', action='store_true',
             help = 'If set, generate a file of output phases per antpol')
+    parser.add_argument('--calc-gain-grade',action='store_true',
+            help = "If set, apply gains to visibilities and calculate a proposed gain grade based on the resultant gains.")
     parser.add_argument('--gendelay', action='store_true',
             help = 'If set, generate a file of output delays per antpol')
     parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
