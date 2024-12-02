@@ -224,7 +224,7 @@ class calibrate_uvh5:
         if calculate_grade:
             gain_grade = calc_gain_grade(gain)
             #we can overwrite the visibility data rather than make a copy as we have already derived our gains and it saves time
-            applycal(self.vis_data, gainsol_dict, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=False)
+            applycal(self.vis_data, gainsol_dict, self.metadata['ant_numbers_data'], self.ant_indices, axis=0, phaseonly=True)
             # self.plot_phases_vs_freq(self.vis_data, os.path.join(outdir,'plots'), plot_amp = True, corrected = True)
             proposed_gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
             proposed_gain = np.squeeze(proposed_gainsol_dict['gain_val'])
@@ -258,7 +258,7 @@ class calibrate_uvh5:
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
         try:
-            print("Writing our the gains per antenna/freq/pols")
+            print(f"Writing our the gains per antenna/freq/pols to {outfile_json}")
             with open(outfile_json, "w") as jh:
                 json.dump(write_out_dict, jh)
             shutil.chown(outfile_json, "cosmic", "cosmic")
