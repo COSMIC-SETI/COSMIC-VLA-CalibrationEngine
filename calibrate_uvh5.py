@@ -84,7 +84,13 @@ class calibrate_uvh5:
         'obs_id' : extra_keywords['ObservationID']}
         return metadata
 
-    def get_refant(self):
+    def get_refant(self, refant = None):
+        """
+        Get the reference antenna for the calibration.
+        If a reference antenna is provided, assert that it is part of the observed antenna names.
+        If no reference antenna is provided, select the antenna with the smallest displacement from the centre.
+        Do not select any reference antenna within the BAD_REFANT list.
+        """
         observed_antenna_names = [
             self.metadata['ant_names'][self.metadata['ant_numbers'].index(antnum)]
             for antnum in self.metadata['ant_numbers_data']
@@ -100,6 +106,9 @@ class calibrate_uvh5:
             sorted_antenna_name_list = observed_antenna_names
 
         for antname in sorted_antenna_name_list:
+            if refant is not None and refant in self.metadata['ant_names']:
+                return refant
+
             if antname not in self.metadata['ant_names']:
                 continue
             
@@ -943,10 +952,9 @@ def main(uvh5_file_path, args):
         if save_file_products:
             with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
                 f.write(detail)
-    if args.refant is None:
-        refant = cal_ob.get_refant()
-    else:
-        refant = args.refant
+   
+    refant = cal_ob.get_refant(refant=args.refant)
+    
     #++++++++++++++++++++++++++++++++++++++++++++++++
     #Use if needed to convert file to a CASA MS format
     #cal_ob.write_ms(args.out_dir)
