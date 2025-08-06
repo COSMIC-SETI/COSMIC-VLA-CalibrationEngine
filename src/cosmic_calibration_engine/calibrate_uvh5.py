@@ -42,16 +42,147 @@ def flag_spectrum(spectrum, win, threshold = 3):
 
 class calibrate_uvh5:
 
-    def __init__(self, datafile, redis_obj):
+    def __init__(self, paths:list, out_dir:str=None, flagrfi:bool=False, gendelay:bool=False,
+                genphase:bool=False, gengain:bool=False, calc_gain_grade:bool=False,
+                pub_to_redis:bool=False, phasevsfreq:bool=False, 
+                phasewaterfall:bool=False, delaywaterfall:bool=False,
+                refant:str=None, detail:bool=False, redis_obj:object=redis_obj):
+
+        # set up path to uvh5 file
+        if len(paths) != 0:
+            self.datafile = ""
+            for path in paths:
+                #iterate through all *.uvh5 files
+                if os.path.isfile(path):
+                    self.datafile = path
+                elif os.path.isdir(path):
+                    for root, dirs, files in os.walk(path):
+                        for file in files:
+                            if file.endswith('.uvh5'):
+                                self.datafile = os.path.join(root, file)
+
+        else:
+            print("No input uvh5 files provided, exiting...")
+            sys.exit(0)
 
         #Initializing the pyuvdata object and reading the files
-        self.datafile = datafile
         self.uvd = UVData()
-        self.uvd.read(datafile, fix_old_proj=False)
+        self.uvd.read(self.datafile, fix_old_proj=False)
         self.metadata = self.get_metadata()
         self.vis_data = self.get_vis_data()
         self.ant_indices = self.get_ant_array_indices()
         self.redis_obj = redis_obj
+        self.detail = detail
+        self.refant = refant
+        self.flag_rfi = flagrfi
+        self.phasevsfreq = phasevsfreq
+        self.phasewaterfall = phasewaterfall
+        self.delaywaterfall = delaywaterfall
+        self.gendelay = gendelay
+        self.genphase = genphase
+        self.gengain = gengain
+        self.calc_gain_grade = calc_gain_grade
+        self.pub_to_redis = pub_to_redis
+
+        #derive output path
+        if out_dir is None:
+            self.out_dir = os.path.join(os.path.dirname(os.path.abspath(self.datafile)), "calibration/calibration_gains")
+        else:
+            self.out_dir = os.path.join(os.path.abspath(out_dir), "calibration/calibration_gains")
+
+        try:
+            os.makedirs(self.out_dir, exist_ok=True)
+            self.save_file_products = True
+        except:
+            print(f"Unable to create directory {self.out_dir}, no solutions/metadata from this calibration run will be saved to file.")
+            self.save_file_products = False
+
+    def run(self):
+        print(f"Processing {self.datafile} now...\n")
+    
+        out_phase, outfile_delays, out_gains = (None, None, None)
+            
+        #Print the metdata of the input file
+        if self.detail:
+            detail = self.print_metadata()
+            print(detail)
+            if self.save_file_products:
+                with open(os.path.join(self.out_dir,f'{self.metadata["obs_id"]}_metadata.txt'), 'w') as f:
+                    f.write(detail)
+    
+        refant = self.get_refant()
+
+        #Flag the narrowband RFI in the data, use this before calculating delays and gains
+        if self.flag_rfi:
+            flagged_freqs = self.flag_rfi_vis(threshold = 5)
+        else:
+            flagged_freqs = None
+
+        #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        #Make a bunch of diagnostic plots before applying calibrations
+        
+        #plot the ampilitude and phase of visibility data
+        if self.phasevsfreq:
+            self.plot_phases_vs_freq(self.vis_data, self.out_dir, plot_amp = True)
+        
+        #plot the Phase waterfall plots of the visibility
+        if self.phasewaterfall:
+            self.plot_phases_waterfall(self.vis_data, self.out_dir, track_phase = True)
+
+        #plot the Delay waterfall plots of the visibility
+        if self.delaywaterfall:
+            self.plot_delays_waterfall(self.vis_data, self.out_dir, track_delay = True)
+        
+        #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        
+        #Calculate the delays and spit out the delay values per baseline in the out_dir
+        if self.gendelay:
+            outfile_delays = self.get_res_delays(self.vis_data, self.out_dir, ref_ant = refant)
+            if outfile_delays is not None and self.save_file_products:
+                shutil.chown(outfile_delays, "cosmic", "cosmic")
+        
+        if self.genphase:
+            antnames, phases = self.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
+            out_phase = {
+                'ant_names': antnames,
+                'freqs_hz': self.metadata['freq_array'].tolist(),
+                'phases_pol0': phases[:,0].tolist(),
+                'phases_pol1': phases[:,1].tolist(),
+            }
+            outfile_phase = os.path.join(self.out_dir, os.path.splitext(os.path.basename(self.datafile))[0] + '_phasecal.json')
+            try:
+                with open(outfile_phase, 'w') as fh:
+                    json.dump(out_phase, fh)
+                shutil.chown(outfile_phase, "cosmic", "cosmic")
+            except:
+                print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
+                pass
+
+        #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        #Derive the gain solutions from the visibility data
+        #The gain dictinary obtained from sdmpy
+        # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
+        if self.gengain:
+            out_gains = self.derive_gains(self.out_dir, ref_ant = refant, flagged_freqs = flagged_freqs, calculate_grade=self.calc_gain_grade)
+                
+        if self.pub_to_redis:
+            self.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
+        #Plotting amplitude and phase of the gain solutions
+        #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
+
+        #Apply the solutions to the same dataset and plot the phases and amplitudes
+        #cal_data = cal_ob.apply_phase(gain)
+        #cal_ob.plot_phases_vs_freq(cal_data, args.out_dir, plot_amp = True, corrected = True)
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++==
+        
+        #Apply the solutions to a different dataset
+        #In that case a create a different object of the same class withe the apply_dat_file
+        # Creating an object with the datset to apply the solutions, apply the solutions and plot the phase and amp
+        #cal_apply_ob = calibrate_uvh5(args.apply_dat_file)
+        #cal_data_apply = cal_apply_ob.apply_phase(gain_dict) #Gain derived from a different file
+        #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
+        
+        print(self.out_dir)
 
     def get_metadata(self):
         """
@@ -84,7 +215,7 @@ class calibrate_uvh5:
         'obs_id' : extra_keywords['ObservationID']}
         return metadata
 
-    def get_refant(self, refant = None):
+    def get_refant(self):
         """
         Get the reference antenna for the calibration.
         If a reference antenna is provided, assert that it is part of the observed antenna names.
@@ -106,8 +237,8 @@ class calibrate_uvh5:
             sorted_antenna_name_list = observed_antenna_names
 
         for antname in sorted_antenna_name_list:
-            if refant is not None and refant in self.metadata['ant_names']:
-                return refant
+            if self.refant is not None and self.refant in self.metadata['ant_names']:
+                return self.refant
 
             if antname not in self.metadata['ant_names']:
                 continue
@@ -953,127 +1084,7 @@ def main():
     If specified, generate and save delay waterfall plots""")
     args = parser.parse_args()
 
-    if len(args.paths) != 0:
-        uvh5_file_path = ""
-        for path in args.paths:
-            #iterate through all *.uvh5 files
-            if os.path.isfile(path):
-                uvh5_file_path = path
-            elif os.path.isdir(path):
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        if file.endswith('.uvh5'):
-                            uvh5_file_path = os.path.join(root, file)
-
-    else:
-        print("No input uvh5 files provided, exiting...")
-        sys.exit(0)
-
-
-    print(f"Processing {uvh5_file_path} now...\n")
-    
-    out_phase, outfile_delays, out_gains = (None, None, None)
-
-    # Creating an object with the input data file from solutions needed to be derived
-    cal_ob = calibrate_uvh5(uvh5_file_path, redis_obj)
-
-    #derive output path
-    if args.out_dir is None:
-        out_dir = os.path.join(os.path.dirname(os.path.abspath(uvh5_file_path)), "calibration/calibration_gains")
-    else:
-        out_dir = os.path.join(os.path.abspath(args.out_dir), "calibration/calibration_gains")
-
-    try:
-        os.makedirs(out_dir, exist_ok=True)
-        save_file_products = True
-    except:
-        print(f"Unable to create directory {out_dir}, no solutions/metadata from this calibration run will be saved to file.")
-        save_file_products = False
-        
-    #Print the metdata of the input file
-    if args.detail:
-        detail = cal_ob.print_metadata()
-        print(detail)
-        if save_file_products:
-            with open(os.path.join(out_dir,f'{cal_ob.metadata["obs_id"]}_metadata.txt'), 'w') as f:
-                f.write(detail)
-   
-    refant = cal_ob.get_refant(refant=args.refant)
-    
-    #++++++++++++++++++++++++++++++++++++++++++++++++
-    #Use if needed to convert file to a CASA MS format
-    #cal_ob.write_ms(args.out_dir)
-
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-    #Flag the narrowband RFI in the data, use this before calculating delays and gains
-    if args.flagrfi:
-        flagged_freqs = cal_ob.flag_rfi_vis(threshold = 5)
-    else:
-        flagged_freqs = None
-
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #Make a bunch of diagnostic plots before applying calibrations
-    
-    #plot the ampilitude and phase of visibility data
-    if args.phasevsfreq:
-        cal_ob.plot_phases_vs_freq(cal_ob.vis_data, args.out_dir, plot_amp = True)
-    
-    #plot the Phase waterfall plots of the visibility
-    if args.phasewaterfall:
-        cal_ob.plot_phases_waterfall(cal_ob.vis_data, args.out_dir, track_phase = True)
-
-    #plot the Delay waterfall plots of the visibility
-    if args.delaywaterfall:
-        cal_ob.plot_delays_waterfall(cal_ob.vis_data, args.out_dir, track_delay = True)
-    
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    
-    #Calculate the delays and spit out the delay values per baseline in the out_dir
-    if args.gendelay:
-        outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir, ref_ant = refant)
-        if outfile_delays is not None and save_file_products:
-            shutil.chown(outfile_delays, "cosmic", "cosmic")
-       
-    if args.genphase:
-        antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
-        out_phase = {
-            'ant_names': antnames,
-            'freqs_hz': cal_ob.metadata['freq_array'].tolist(),
-            'phases_pol0': phases[:,0].tolist(),
-            'phases_pol1': phases[:,1].tolist(),
-        }
-        outfile_phase = os.path.join(out_dir, os.path.splitext(os.path.basename(uvh5_file_path))[0] + '_phasecal.json')
-        try:
-            with open(outfile_phase, 'w') as fh:
-                json.dump(out_phase, fh)
-            shutil.chown(outfile_phase, "cosmic", "cosmic")
-        except:
-            print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
-            pass
-
-    #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #Derive the gain solutions from the visibility data
-    #The gain dictinary obtained from sdmpy
-    # Contains the list of antennas, ref antenna used to derive gain and the gain solutions in the form of (nant, ntimes, nfreqs, pols)
-    if args.gengain:
-        out_gains = cal_ob.derive_gains(out_dir, ref_ant = refant, flagged_freqs = flagged_freqs, calculate_grade=args.calc_gain_grade)
-            
-    if args.pub_to_redis:
-        cal_ob.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
-    #Plotting amplitude and phase of the gain solutions
-    #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
-
-    #Apply the solutions to the same dataset and plot the phases and amplitudes
-    #cal_data = cal_ob.apply_phase(gain)
-    #cal_ob.plot_phases_vs_freq(cal_data, args.out_dir, plot_amp = True, corrected = True)
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++==
-    
-    #Apply the solutions to a different dataset
-    #In that case a create a different object of the same class withe the apply_dat_file
-    # Creating an object with the datset to apply the solutions, apply the solutions and plot the phase and amp
-    #cal_apply_ob = calibrate_uvh5(args.apply_dat_file)
-    #cal_data_apply = cal_apply_ob.apply_phase(gain_dict) #Gain derived from a different file
-    #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
-    
-    print(out_dir)
+    cal_obj = calibrate_uvh5(args.paths, args.out_dir, args.flagrfi, args.gendelay, args.genphase, args.gengain,
+                             args.calc_gain_grade, args.pub_to_redis, args.phasevsfreq, args.phasewaterfall, args.delaywaterfall,
+                             args.refant, args.detail, redis_obj)
+    cal_obj.run()
