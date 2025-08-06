@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0", "cython"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cosmic_calibration_engine"
+version = "1.0.0"
+authors = [
+  { name="Talon Myburgh", email="talon.myburgh@mydon.co.za" },
+]
+description = "Python package for VLA COSMIC calibration and SQL database access."
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  "sqlalchemy",
+  "pyaml==25.7.0",
+  "numpy==1.21.6",
+  "matplotlib==3.5.1",
+  "pyuvdata==2.4.1",
+  "pandas==1.5.3",
+  "redis==4.5.1",
+  "shutil; python_version<'3.8'", # shutil is stdlib, but for completeness
+]
+
+[project.scripts]
+calibrate-uvh5 = "cosmic_calibration_engine.calibrate_uvh5:main"

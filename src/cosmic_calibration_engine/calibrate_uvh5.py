@@ -16,8 +16,8 @@ from cosmic.redis_actions import redis_obj, redis_hget_keyvalues, redis_publish_
 from matplotlib import pyplot as plt
 import pyuvdata.utils as uvutils
 from pyuvdata import UVData
-from calib_util import gaincal_cpu, applycal, flag_complex_vis_medf, calc_gain_grade
-from sliding_rfi_flagger import flag_rfi_real
+from .calib_util import gaincal_cpu, applycal, flag_complex_vis_medf, calc_gain_grade
+from .sliding_rfi_flagger import flag_rfi_real
 
 BAD_REFANT = []#["ea05","ea06"]
 
@@ -923,7 +923,52 @@ class calibrate_uvh5:
             redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", gains_out)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
-def main(uvh5_file_path, args):
+def main():
+    # Argument parser taking various arguments
+    parser = argparse.ArgumentParser(
+        description='Reads UVH5 files, derives delay and gain calibrations, apply to the data, make a bunch of diagnostic plots',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('paths', nargs='*', help = 'UVH5 file/files to derive delay and phase calibrations')
+    parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
+    parser.add_argument('-o','--out_dir', type = str, required = False, help = 'Output directory to save the plots - if not provided, will write out gains to same directory as input uvh5')
+    parser.add_argument('--refant', type = str, required = False, help = 'Reference antenna to use in gain derivation')
+    parser.add_argument('--flagrfi', action='store_true',
+            help = 'If set, flag the narrowband RFI in the dataset')
+    parser.add_argument('--gengain', action='store_true',
+            help = 'If set, generate a json file of output gain per antenna/freq/pol')
+    parser.add_argument('--genphase', action='store_true',
+            help = 'If set, generate a file of output phases per antpol')
+    parser.add_argument('--calc-gain-grade',action='store_true',
+            help = "If set, apply gains to visibilities and calculate a proposed gain grade based on the resultant gains.")
+    parser.add_argument('--gendelay', action='store_true',
+            help = 'If set, generate a file of output delays per antpol')
+    parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
+    parser.add_argument('--detail', action='store_true', help="""
+    If specified, will print out and save the UVH5 header to file""")
+    parser.add_argument('--phasevsfreq', action='store_true', help="""
+    If specified, generate and save plots of phase vs frequency""")
+    parser.add_argument('--phasewaterfall', action='store_true', help="""
+    If specified, generate and save phase waterfall plots""")
+    parser.add_argument('--delaywaterfall', action='store_true', help="""
+    If specified, generate and save delay waterfall plots""")
+    args = parser.parse_args()
+
+    if len(args.paths) != 0:
+        uvh5_file_path = ""
+        for path in args.paths:
+            #iterate through all *.uvh5 files
+            if os.path.isfile(path):
+                uvh5_file_path = path
+            elif os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        if file.endswith('.uvh5'):
+                            uvh5_file_path = os.path.join(root, file)
+
+    else:
+        print("No input uvh5 files provided, exiting...")
+        sys.exit(0)
+
 
     print(f"Processing {uvh5_file_path} now...\n")
     
@@ -987,7 +1032,8 @@ def main(uvh5_file_path, args):
     #Calculate the delays and spit out the delay values per baseline in the out_dir
     if args.gendelay:
         outfile_delays = cal_ob.get_res_delays(cal_ob.vis_data, out_dir, ref_ant = refant)
-        shutil.chown(outfile_delays, "cosmic", "cosmic")
+        if outfile_delays is not None and save_file_products:
+            shutil.chown(outfile_delays, "cosmic", "cosmic")
        
     if args.genphase:
         antnames, phases = cal_ob.get_phases(ref_ant = refant) # An antenna x time x channel x ?cross-pol?
@@ -1031,56 +1077,3 @@ def main(uvh5_file_path, args):
     #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
     
     print(out_dir)
-    
-if __name__ == '__main__':
-    
-    # Argument parser taking various arguments
-    parser = argparse.ArgumentParser(
-        description='Reads UVH5 files, derives delay and gain calibrations, apply to the data, make a bunch of diagnostic plots',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('paths', nargs='*', help = 'UVH5 file/files to derive delay and phase calibrations')
-    parser.add_argument('-ad','--apply_dat_file', type = str, required = False, help = 'UVH5 file to apply solutions derived from UVH5 file')
-    parser.add_argument('-o','--out_dir', type = str, required = False, help = 'Output directory to save the plots - if not provided, will write out gains to same directory as input uvh5')
-    parser.add_argument('--refant', type = str, required = False, help = 'Reference antenna to use in gain derivation')
-    parser.add_argument('--flagrfi', action='store_true',
-            help = 'If set, flag the narrowband RFI in the dataset')
-    parser.add_argument('--gengain', action='store_true',
-            help = 'If set, generate a json file of output gain per antenna/freq/pol')
-    parser.add_argument('--genphase', action='store_true',
-            help = 'If set, generate a file of output phases per antpol')
-    parser.add_argument('--calc-gain-grade',action='store_true',
-            help = "If set, apply gains to visibilities and calculate a proposed gain grade based on the resultant gains.")
-    parser.add_argument('--gendelay', action='store_true',
-            help = 'If set, generate a file of output delays per antpol')
-    parser.add_argument('--pub-to-redis', action="store_true", help ="Set up a redis object and publish the residual delays and calibration phases to it.")
-    parser.add_argument('--detail', action='store_true', help="""
-    If specified, will print out and save the UVH5 header to file""")
-    parser.add_argument('--phasevsfreq', action='store_true', help="""
-    If specified, generate and save plots of phase vs frequency""")
-    parser.add_argument('--phasewaterfall', action='store_true', help="""
-    If specified, generate and save phase waterfall plots""")
-    parser.add_argument('--delaywaterfall', action='store_true', help="""
-    If specified, generate and save delay waterfall plots""")
-    args = parser.parse_args()
-
-    # try:
-    #     # recursive_chown(args.out_dir, "cosmic", "cosmic")
-    #     os.system(f"chown cosmic:swdev -R {args.out_dir}")
-    # except:
-    #     pass
-
-    if len(args.paths) != 0:
-        for path in args.paths:
-            #iterate through all *.uvh5 files
-            if os.path.isfile(path):
-                file_path = path
-                main(file_path, args)
-            elif os.path.isdir(path):
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        if file.endswith('.uvh5'):
-                            file_path = os.path.join(root, file)
-                            main(file_path, args)
-
-
-

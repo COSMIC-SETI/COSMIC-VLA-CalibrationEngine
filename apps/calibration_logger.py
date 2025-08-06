@@ -98,7 +98,8 @@ def calibration_logger(influxdb_token):
                     value = Point("delay_state").tag("ant",ant).field("phase_cal_correct",int(all(cal_phase_correct))).time(time_now)
                     write_api.write(bucket, org, value)
 
-if __name__ == "__main__":
+
+def cli_calibration_logger():
     parser = argparse.ArgumentParser(
     description=("Set up the Calibration logger.")
     )
@@ -116,3 +117,6 @@ if __name__ == "__main__":
         influxdb_token = os.environ["INFLUXDB_TOKEN"]
 
     calibration_logger(influxdb_token)
+
+if __name__ == "__main__":
+    cli_calibration_logger()

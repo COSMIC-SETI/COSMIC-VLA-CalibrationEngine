@@ -7,7 +7,7 @@ Also, contains a RFI flagging routines for COSMIC
 import numpy as np
 import warnings
 from numpy import linalg as linalg_cpu
-from sliding_rfi_flagger import flag_rfi_complex_pol
+from .sliding_rfi_flagger import flag_rfi_complex_pol
 from scipy.stats import median_abs_deviation as mad
 
 def calc_gain_grade(gain_matrix):

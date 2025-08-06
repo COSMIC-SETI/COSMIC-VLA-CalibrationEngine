@@ -118,7 +118,7 @@ def antfxdelay_from_baselinefxdelay(d_AC : str = "", d_BD : str = "", inpt_fx_de
 
     
 
-if __name__ == "__main__":
+def cli_antfxdelay_from_baselinefxdelay():
     parser = argparse.ArgumentParser(
     description=("""Accept 2 input csv's (one for each tuning) containing baseline to delay mappings, apply residuals to the
     current applied delays csv and save it to the same location.""")
@@ -131,3 +131,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     antfxdelay_from_baselinefxdelay(args.d_AC, args.d_BD, inpt_fx_delay=args.fixed_delay_to_update)
+
+if __name__ == "__main__":
+    cli_antfxdelay_from_baselinefxdelay()
