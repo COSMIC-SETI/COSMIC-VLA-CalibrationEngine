@@ -1054,7 +1054,7 @@ class calibrate_uvh5:
             redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", gains_out)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
-def main():
+def main(arg_values: list[str] = None):
     # Argument parser taking various arguments
     parser = argparse.ArgumentParser(
         description='Reads UVH5 files, derives delay and gain calibrations, apply to the data, make a bunch of diagnostic plots',
@@ -1082,7 +1082,9 @@ def main():
     If specified, generate and save phase waterfall plots""")
     parser.add_argument('--delaywaterfall', action='store_true', help="""
     If specified, generate and save delay waterfall plots""")
-    args = parser.parse_args()
+    if arg_values is None:
+        arg_values = sys.argv[1:]
+    args = parser.parse_args(arg_values)
 
     cal_obj = calibrate_uvh5(args.paths, args.out_dir, args.flagrfi, args.gendelay, args.genphase, args.gengain,
                              args.calc_gain_grade, args.pub_to_redis, args.phasevsfreq, args.phasewaterfall, args.delaywaterfall,
