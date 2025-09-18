@@ -41,12 +41,17 @@ def flag_spectrum(spectrum, win, threshold = 3):
 
 
 class calibrate_uvh5:
+    def _print(self, *args, **kwargs):
+        if self.logger is not None:
+            self.logger.info(*args, **kwargs)
+        else:
+            print(*args, **kwargs)
 
     def __init__(self, paths:list, out_dir:str=None, flagrfi:bool=False, gendelay:bool=False,
                 genphase:bool=False, gengain:bool=False, calc_gain_grade:bool=False,
                 pub_to_redis:bool=False, phasevsfreq:bool=False, 
                 phasewaterfall:bool=False, delaywaterfall:bool=False,
-                refant:str=None, detail:bool=False, redis_obj:object=redis_obj):
+                refant:str=None, detail:bool=False, redis_obj:object=redis_obj, logger=None):
 
         # set up path to uvh5 file
         if len(paths) != 0:
@@ -62,7 +67,7 @@ class calibrate_uvh5:
                                 self.datafile = os.path.join(root, file)
 
         else:
-            print("No input uvh5 files provided, exiting...")
+            self._print("No input uvh5 files provided, exiting...")
             sys.exit(0)
 
         #Initializing the pyuvdata object and reading the files
@@ -83,6 +88,7 @@ class calibrate_uvh5:
         self.gengain = gengain
         self.calc_gain_grade = calc_gain_grade
         self.pub_to_redis = pub_to_redis
+        self.logger = logger
 
         #derive output path
         if out_dir is None:
@@ -94,21 +100,26 @@ class calibrate_uvh5:
             os.makedirs(self.out_dir, exist_ok=True)
             self.save_file_products = True
         except:
-            print(f"Unable to create directory {self.out_dir}, no solutions/metadata from this calibration run will be saved to file.")
+            self._print(f"Unable to create directory {self.out_dir}, no solutions/metadata from this calibration run will be saved to file.")
             self.save_file_products = False
+        
+        self.output_filepaths = []
 
     def run(self):
-        print(f"Processing {self.datafile} now...\n")
+        self.output_filepaths = []
+        self._print(f"Processing {self.datafile} now...\n")
     
         out_phase, outfile_delays, out_gains = (None, None, None)
             
         #Print the metdata of the input file
         if self.detail:
             detail = self.print_metadata()
-            print(detail)
+            self._print(detail)
             if self.save_file_products:
-                with open(os.path.join(self.out_dir,f'{self.metadata["obs_id"]}_metadata.txt'), 'w') as f:
+                output_filepath = os.path.join(self.out_dir,f'{self.metadata["obs_id"]}_metadata.txt')
+                with open(output_filepath, 'w') as f:
                     f.write(detail)
+                self.output_filepaths.append(output_filepath)
     
         refant = self.get_refant()
 
@@ -154,8 +165,9 @@ class calibrate_uvh5:
                 with open(outfile_phase, 'w') as fh:
                     json.dump(out_phase, fh)
                 shutil.chown(outfile_phase, "cosmic", "cosmic")
+                self.output_filepaths.append(out_phase)
             except:
-                print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
+                self._print(f"Unable to create file {outfile_phase}. Continuing without saving phase dictionary to disk...")
                 pass
 
         #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -166,7 +178,7 @@ class calibrate_uvh5:
             out_gains = self.derive_gains(self.out_dir, ref_ant = refant, flagged_freqs = flagged_freqs, calculate_grade=self.calc_gain_grade)
                 
         if self.pub_to_redis:
-            self.pub_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
+            self.publish_to_redis(phase_out = out_phase, delays_outfile = outfile_delays, gains_out = out_gains)
         #Plotting amplitude and phase of the gain solutions
         #cal_ob.plot_gain_phases_amp(gain, args.out_dir, plot_amp = True)
 
@@ -182,7 +194,7 @@ class calibrate_uvh5:
         #cal_data_apply = cal_apply_ob.apply_phase(gain_dict) #Gain derived from a different file
         #cal_apply_ob.plot_phases_vs_freq(cal_data_apply, args.out_dir, plot_amp = True, corrected = True)
         
-        print(self.out_dir)
+        self._print(self.out_dir)
 
     def get_metadata(self):
         """
@@ -317,12 +329,12 @@ class calibrate_uvh5:
         Flag RFI channels in the visibility data
 
         """
-        print("Starting RFI flagging now")
+        self._print("Starting RFI flagging now")
         t1 = time.time()
         self.vis_data, flagged_visibility_idx = flag_complex_vis_medf(self.vis_data, threshold)
         flagged_freqs = self.derive_flagged_frequencies(flagged_visibility_idx, ref_ant = 'ea21')
         t2 = time.time()
-        print(f"Flagging finished in {t2-t1}s")
+        self._print(f"Flagging finished in {t2-t1}s")
         return flagged_freqs
 
     def derive_flagged_frequencies(self, flagged_visibility_idx, ref_ant):
@@ -353,7 +365,7 @@ class calibrate_uvh5:
         gains, calculate a grade.
         """
 
-        print("Deriving Calibrations now")
+        self._print("Deriving Calibrations now")
         t1 = time.time()
         #Check the ref antenna here, make sure if it is antenna 10.
         antind = int(ref_ant[2:])
@@ -369,7 +381,7 @@ class calibrate_uvh5:
             proposed_gainsol_dict = gaincal_cpu(self.vis_data, self.metadata['ant_numbers_data'], self.ant_indices,  axis = 0, avg = [1], ref_ant = antind)
             proposed_gain = np.squeeze(proposed_gainsol_dict['gain_val'])
             proposed_gain_grade = calc_gain_grade(proposed_gain)
-            print(f"Calculated proposed gain grade of: {proposed_gain_grade}")
+            self._print(f"Calculated proposed gain grade of: {proposed_gain_grade}")
         
         #for i in range(1,29):
         #    ant = "ea"+str(i).zfill(2)
@@ -398,18 +410,19 @@ class calibrate_uvh5:
         outfile_json = os.path.join(outdir, os.path.splitext(os.path.basename(self.datafile))[0] + f"_gain_dict.json")
 
         try:
-            print(f"Writing our the gains per antenna/freq/pols to {outfile_json}")
+            self._print(f"Writing our the gains per antenna/freq/pols to {outfile_json}")
             with open(outfile_json, "w") as jh:
                 json.dump(write_out_dict, jh)
             shutil.chown(outfile_json, "cosmic", "cosmic")
+            self.output_filepaths.append(outfile_json)
         except:
-            print(f"Unable to create file {outfile_json}. Continuing without saving gain dictionary to disk...")
+            self._print(f"Unable to create file {outfile_json}. Continuing without saving gain dictionary to disk...")
             pass
 
         t2 = time.time()
-        print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
+        self._print(f"Took {t2-t1}s for getting solution from {self.metadata['lobs']}s of data")
 
-        print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
+        self._print(f"Solution shape: {gainsol_dict['gain_val'].shape}")
         
         return write_out_dict
 
@@ -454,7 +467,7 @@ class calibrate_uvh5:
         Plots the amplitude and phase (averaged over time) across frequency for a gain solutions (antenna, times, frequency, pols)
         """
         
-        print("plotting gain phase & amp vs freq ")
+        self._print("plotting gain phase & amp vs freq ")
         
         gain_ant= gain_dict['antennas']
         gain = gain_dict['gain_val']
@@ -492,13 +505,14 @@ class calibrate_uvh5:
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
             plt.savefig(outfile, dpi = 150)
+            self.output_filepaths.append(outfile)
             plt.close()
         
         
         if plot_amp:
 
             #plotting the amplitude 
-            print("Plotting Gain amplitude vs freq over time")
+            self._print("Plotting Gain amplitude vs freq over time")
             for n in range(nplts):
                  
                 outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"gain_amp_vs_freq_{n}.png")
@@ -524,6 +538,7 @@ class calibrate_uvh5:
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
                 plt.savefig(outfile, dpi = 150)
+                self.output_filepaths.append(outfile)
                 plt.close()
 
     def plot_phases_vs_freq(self, data, outdir, plot_amp = False, corrected = False):
@@ -532,7 +547,7 @@ class calibrate_uvh5:
         Plotting the phase and amplitude across frequency for a visibility dataset
         Use corrected = True to adjust the title after the gain corrections
         """
-        print("plotting phase vs freq on all baselines")
+        self._print("plotting phase vs freq on all baselines")
 
         data_avg = np.mean(data, axis=1)
         ant1, ant2 = self.uvd.baseline_to_antnums(self.uvd.baseline_array[:self.metadata['nbls']])
@@ -576,17 +591,18 @@ class calibrate_uvh5:
             fig.supylabel("Phase (degrees)")
             fig.supxlabel("Frequency (GHz)")
             try:
-                print(f"Writing to: {outfile}")
+                self._print(f"Writing to: {outfile}")
                 plt.savefig(outfile, dpi = 150)
+                self.output_filepaths.append(outfile)
             except Exception as e:
-                print(f"Encountered an error while saving the plot {e}")
+                self._print(f"Encountered an error while saving the plot {e}")
                 pass
             plt.close()
         
         
         if plot_amp:
             #plotting the amplitude 
-            print("Plotting amplitude vs freq over time")
+            self._print("Plotting amplitude vs freq over time")
             for n in range(nplts):
                 if not corrected:
                     outfile = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_uncor_amp_vs_freq_{n}.png")
@@ -616,10 +632,11 @@ class calibrate_uvh5:
                 fig.supylabel("Amplitude (a.u.)")
                 fig.supxlabel("Frequency (GHz)")
                 try:
-                    print(f"Writing to: {outfile}")
+                    self._print(f"Writing to: {outfile}")
                     plt.savefig(outfile, dpi = 150)
+                    self.output_filepaths.append(outfile)
                 except Exception as e:
-                    print(f"Encountered an error while saving the plot {e}")
+                    self._print(f"Encountered an error while saving the plot {e}")
                     pass
                 plt.close()
             
@@ -646,7 +663,7 @@ class calibrate_uvh5:
         xr = np.linspace((self.metadata['freq_array'].min()-(delx/2.0))/1e+9, (self.metadata['freq_array'].max() + (delx/2.0))/1e+9, len(self.metadata['freq_array'])+1)
 
         #Plotting the RR
-        print("Plotting phase vs freq over time for RR")
+        self._print("Plotting phase vs freq over time for RR")
         for n in range(nplts):
             outfile_rr = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_phase_waterfall_rr_{n}.png")
             fig_ph1, axs_ph1 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -667,13 +684,14 @@ class calibrate_uvh5:
             fig_ph1.supxlabel("Frequency (GHz)")
             try:
                 plt.savefig(outfile_rr, dpi = 150)
+                self.output_filepaths.append(outfile_rr)
             except:
                 pass
             plt.close()
         
     
         #plotting the LL 
-        print("Plotting phase vs freq over time for LL")
+        self._print("Plotting phase vs freq over time for LL")
         for n in range(nplts):
             outfile_ll = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_phase_waterfall_ll_{n}.png")
             fig_ph2, axs_ph2 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -694,12 +712,13 @@ class calibrate_uvh5:
             fig_ph2.supxlabel("Frequency (GHz)")
             try:
                 plt.savefig(outfile_ll, dpi = 150)
+                self.output_filepaths.append(outfile_ll)
             except:
                 pass
             plt.close()
 
         if track_phase:
-            print("Plotting averaged phase over frequency vs  time")
+            self._print("Plotting averaged phase over frequency vs  time")
             for n in range(nplts):
                 outfile_ph_track = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_phase_tracked_rr_ll_{n}.png")
                 fig_ph3, axs_ph3 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -729,6 +748,7 @@ class calibrate_uvh5:
                 fig_ph3.supylabel("Phase averaged over frequency (degrees) ")
                 try:
                     plt.savefig(outfile_ph_track, dpi = 150)
+                    self.output_filepaths.append(outfile_ph_track)
                 except:
                     pass
                 plt.close()   
@@ -771,7 +791,7 @@ class calibrate_uvh5:
         try:
             dh = open(outfile_res, "w")
         except:
-            print(f"Unable to create {outfile_res}, cannot save delays to file - Aborting run.")
+            self._print(f"Unable to create {outfile_res}, cannot save delays to file - Aborting run.")
             return None
 
         dh.write(",".join(
@@ -900,7 +920,7 @@ class calibrate_uvh5:
         xr = np.linspace(tlags.min()-(delx/2.0), tlags.max() + (delx/2.0), len(tlags)+1)
 
         #Plotting the RR delay waterfall
-        print("Plotting delay vs time-lags over time for RR")
+        self._print("Plotting delay vs time-lags over time for RR")
         for n in range(nplts):
             outfile_rr = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_delay_waterfall_rr_{n}.png")
             fig_d1, axs_d1 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -932,13 +952,14 @@ class calibrate_uvh5:
             fig_d1.supxlabel("Time-lags (ns)")
             try:
                 plt.savefig(outfile_rr, dpi = 150)
+                self.output_filepaths.append(outfile_rr)
             except:
                 pass
             plt.close()
         
 
         #plotting the delay waterfall over time for each baseline
-        print("Plotting delays vs time-lags over time for LL")
+        self._print("Plotting delays vs time-lags over time for LL")
         for n in range(nplts):
             outfile_ll = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_delay_waterfall_ll_{n}.png")
             fig_d2, axs_d2 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -969,6 +990,7 @@ class calibrate_uvh5:
             fig_d2.supxlabel("Time-lags (ns)")
             try:
                 plt.savefig(outfile_ll, dpi = 150)
+                self.output_filepaths.append(outfile_ll)
             except:
                 pass
             plt.close()
@@ -976,7 +998,7 @@ class calibrate_uvh5:
         #plotting the delay values
         if track_delay:
             
-            print("Plotting delay peaks vs time-lags over time")
+            self._print("Plotting delay peaks vs time-lags over time")
             for n in range(nplts):
                 outfile_peak = os.path.join(outdir, os.path.basename(self.datafile).split('.')[0]+ f"_delay_tracked_rr_ll_{n}.png")
                 fig_d3, axs_d3 = plt.subplots(grid_x, grid_y, sharex  = True, sharey = True, constrained_layout=True, figsize = (12,12))
@@ -998,12 +1020,13 @@ class calibrate_uvh5:
                 fig_d3.supylabel("Delay peak (ns)")
                 try:
                     plt.savefig(outfile_peak, dpi = 150)
+                    self.output_filepaths.append(outfile_peak)
                 except:
                     pass
                 plt.close()    
             
     
-    def pub_to_redis(self, phase_out = None, delays_outfile = None, gains_out = None):
+    def publish_to_redis(self, phase_out = None, delays_outfile = None, gains_out = None):
         #create channel pubsub object for broadcasting changes to phases/residual-delays
         pubsub = self.redis_obj.pubsub(ignore_subscribe_messages=True)
         if phase_out is not None:
@@ -1054,7 +1077,7 @@ class calibrate_uvh5:
             redis_publish_dict_to_hash(self.redis_obj, "GPU_calibrationGains", gains_out)
             self.redis_obj.publish("gpu_calibrationgains", json.dumps(True))
 
-def main(arg_values: list[str] = None):
+def main(arg_values: "list[str]" = None, ret_output_filepaths: "list[str]" = None, logger = None):
     # Argument parser taking various arguments
     parser = argparse.ArgumentParser(
         description='Reads UVH5 files, derives delay and gain calibrations, apply to the data, make a bunch of diagnostic plots',
@@ -1088,5 +1111,7 @@ def main(arg_values: list[str] = None):
 
     cal_obj = calibrate_uvh5(args.paths, args.out_dir, args.flagrfi, args.gendelay, args.genphase, args.gengain,
                              args.calc_gain_grade, args.pub_to_redis, args.phasevsfreq, args.phasewaterfall, args.delaywaterfall,
-                             args.refant, args.detail, redis_obj)
+                             args.refant, args.detail, redis_obj, logger=logger)
     cal_obj.run()
+    if ret_output_filepaths is not None:
+        ret_output_filepaths.extend(cal_obj.output_filepaths)
