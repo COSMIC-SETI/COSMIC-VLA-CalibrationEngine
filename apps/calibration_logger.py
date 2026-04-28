@@ -6,8 +6,7 @@ import numpy as np
 import logging
 import json
 from logging.handlers import RotatingFileHandler
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client_3 import InfluxDBClient3, Point  # Updated to v3
 import os
 import argparse
 
@@ -39,15 +38,15 @@ delay_update_channel = "update_calibration_delays"
 phase_update_channel = "update_calibration_phases"
 
 def calibration_logger(influxdb_token):
-    #influxdb stuff:
-    bucket = "delays"
-    org="seti"
-    client = InfluxDBClient(url='http://localhost:8086', token=influxdb_token)
-    write_api = client.write_api(write_options=SYNCHRONOUS)
+    # InfluxDB v3 Setup
+    database = "delay_influxdb" # Pushing to the same DB as delay_logger
+    org = "seti"
+
+    client = InfluxDBClient3(host='http://localhost:8181', token=influxdb_token, org=org, database=database)
 
     logger.info("Starting Calibration logger...\n")
 
-    #redis channel listening:
+    # redis channel listening:
     pubsub = redis_obj.pubsub(ignore_subscribe_messages=True)
     for channel in [delay_update_channel, phase_update_channel]:
         try:
@@ -63,29 +62,39 @@ def calibration_logger(influxdb_token):
             continue
 
         if message['channel'] == delay_update_channel:
-            #Fixed delays logging
+            # Fixed delays logging
             if json_message:
-                time_now = time.time_ns()
+                time_now = int(time.time_ns())
+                points_to_write = []
+                
                 loaded_delay_file = redis_hget_keyvalues(redis_obj, "CAL_fixedValuePaths", "fixed_delay")
-                value = Point("fix_paths").field("fixed_delay_path",loaded_delay_file["fixed_delay"]).time(time_now)
-                write_api.write(bucket, org, value)   
+                pt_delay_path = Point("fix_paths").field("fixed_delay_path", str(loaded_delay_file["fixed_delay"])).time(time_now)
+                points_to_write.append(pt_delay_path)
+                
                 fixed_delays = redis_hget_keyvalues(redis_obj, "META_calibrationDelays")
                 for ant, delays in fixed_delays.items():
                     ant_calib_delays = np.fromiter(delays.values(),dtype=float)
                     for stream in range(4):
-                        #Load fixed delays contents
-                        value = Point("fix_delays").tag("ant",ant).tag("stream",stream).field("fixed_delay_ns",ant_calib_delays[stream]).time(time_now)
-                        write_api.write(bucket, org, value)
+                        # Load fixed delays contents
+                        pt_fixed_delay = Point("fix_delays").tag("ant",ant).tag("stream", str(stream)).field("fixed_delay_ns", float(ant_calib_delays[stream])).time(time_now)
+                        points_to_write.append(pt_fixed_delay)
+                        
+                if points_to_write:
+                    client.write(record=points_to_write)
 
         if message['channel'] == phase_update_channel:
             if json_message:
-                time_now = time.time_ns()
-                #arbitraly check grade in this case
+                time_now = int(time.time_ns())
+                points_to_write = []
+                
                 calibration_phase_grade = redis_hget_keyvalues(redis_obj, "CAL_fixedValuePaths", ["fixed_phase","grade"])
-                value = Point("fix_paths").field("fixed_phase_path",calibration_phase_grade["fixed_phase"]).time(time_now)
-                write_api.write(bucket, org, value)
-                value = Point("fix_paths").field("calibration_grade",calibration_phase_grade["grade"]).time(time_now)
-                write_api.write(bucket, org, value)
+                
+                pt_phase_path = Point("fix_paths").field("fixed_phase_path", str(calibration_phase_grade["fixed_phase"])).time(time_now)
+                points_to_write.append(pt_phase_path)
+                
+                pt_grade = Point("fix_paths").field("calibration_grade", float(calibration_phase_grade["grade"])).time(time_now)
+                points_to_write.append(pt_grade)
+                
                 ant_feng_map = ant_remotefeng_map.get_antennaFengineDict(redis_obj)
                 ant_phase_cal_map = redis_hget_keyvalues(redis_obj, "META_calibrationPhases")   
                 for ant, cal_phase in ant_phase_cal_map.items():
@@ -95,9 +104,12 @@ def calibration_logger(influxdb_token):
                     for stream in range(expected_cal_phase.shape[0]):
                         cal_phase_correct += [bool(np.all(np.isclose(expected_cal_phase[stream,:],
                                         np.array(feng.phaserotate.get_phase_cal(stream),dtype=float), atol=1e-1)))] 
-                    value = Point("delay_state").tag("ant",ant).field("phase_cal_correct",int(all(cal_phase_correct))).time(time_now)
-                    write_api.write(bucket, org, value)
-
+                    
+                    pt_phase_correct = Point("delay_state").tag("ant",ant).field("phase_cal_correct", int(all(cal_phase_correct))).time(time_now)
+                    points_to_write.append(pt_phase_correct)
+                    
+                if points_to_write:
+                    client.write(record=points_to_write)
 
 def cli_calibration_logger():
     parser = argparse.ArgumentParser(
