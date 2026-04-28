@@ -79,8 +79,11 @@ def calibration_logger(influxdb_token):
                         pt_fixed_delay = Point("fix_delays").tag("ant",ant).tag("stream", str(stream)).field("fixed_delay_ns", float(ant_calib_delays[stream])).time(time_now)
                         points_to_write.append(pt_fixed_delay)
                         
+                # Inside calibration_logger.py
                 if points_to_write:
+                    print(f"Writing {len(points_to_write)} points to {database}...")
                     client.write(record=points_to_write)
+                    print("Write successful.")
 
         if message['channel'] == phase_update_channel:
             if json_message:
@@ -97,19 +100,40 @@ def calibration_logger(influxdb_token):
                 
                 ant_feng_map = ant_remotefeng_map.get_antennaFengineDict(redis_obj)
                 ant_phase_cal_map = redis_hget_keyvalues(redis_obj, "META_calibrationPhases")   
+                
                 for ant, cal_phase in ant_phase_cal_map.items():
-                    cal_phase_correct = []
-                    feng = ant_feng_map[ant]
-                    expected_cal_phase = (np.array(cal_phase,dtype=float) + np.pi) % (2 * np.pi) - np.pi
-                    for stream in range(expected_cal_phase.shape[0]):
-                        cal_phase_correct += [bool(np.all(np.isclose(expected_cal_phase[stream,:],
-                                        np.array(feng.phaserotate.get_phase_cal(stream),dtype=float), atol=1e-1)))] 
+                    status = -1  # Default to "Unknown/Unreachable"
                     
-                    pt_phase_correct = Point("delay_state").tag("ant",ant).field("phase_cal_correct", int(all(cal_phase_correct))).time(time_now)
+                    try:
+                        if ant not in ant_feng_map:
+                            logger.warning(f"{ant} present in Redis phases but not in F-Engine map. Skipping...")
+                        else:
+                            feng = ant_feng_map[ant]
+                            cal_phase_correct = []
+                            expected_cal_phase = (np.array(cal_phase, dtype=float) + np.pi) % (2 * np.pi) - np.pi
+                            
+                            for stream in range(expected_cal_phase.shape[0]):
+                                hardware_phase = np.array(feng.phaserotate.get_phase_cal(stream), dtype=float)
+                                cal_phase_correct += [bool(np.all(np.isclose(expected_cal_phase[stream, :],
+                                                              hardware_phase, atol=1e-1)))] 
+                            
+                            # Calculate final Boolean status (1 = Correct, 0 = Mismatch)
+                            status = int(all(cal_phase_correct))
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to verify phase calibration for {ant}: {e}")
+                        status = -1 
+
+                    pt_phase_correct = Point("delay_state").tag("ant", ant) \
+                        .field("phase_cal_correct", status) \
+                        .time(time_now)
                     points_to_write.append(pt_phase_correct)
                     
+                # Inside calibration_logger.py
                 if points_to_write:
+                    print(f"Writing {len(points_to_write)} points to {database}...")
                     client.write(record=points_to_write)
+                    print("Write successful.")
 
 def cli_calibration_logger():
     parser = argparse.ArgumentParser(
